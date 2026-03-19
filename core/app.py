@@ -8,6 +8,7 @@ import time
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
+#ebraioi
 
 from PIL import Image, ImageDraw, ImageTk
 import psutil
@@ -667,9 +668,10 @@ def main():
         canvas.delete("all")
         w = canvas.winfo_width()
         if w < 10: w = 400
-        pad_l, pad_r, pad_t, pad_b = 36, 44, 8, 18
+        pad_l, pad_r, pad_t, pad_b = 36, 52, 8, 18
         plot_w = w - pad_l - pad_r
         plot_h = height - pad_t - pad_b
+        label_x = w - pad_r + 4
         for tv in [0, 25, 50, 75, 100]:
             y = pad_t + plot_h * (1 - tv / 100)
             canvas.create_line(pad_l, y, w-pad_r, y, fill="#1e2a3a", dash=(3,4))
@@ -680,8 +682,10 @@ def main():
             canvas.create_text(x, height-pad_b+8,
                                text=f"-{60-i}s" if i < 60 else "now",
                                fill="#4a5568", font=("Segoe UI", 7))
-        for idx, (data, color) in enumerate(series_list):
-            pts   = list(data); n = len(pts)
+        label_min_gap = 12
+        raw_labels = []
+        for data, color in series_list:
+            pts = list(data); n = len(pts)
             if n < 2: continue
             valid = [(i, v) for i, v in enumerate(pts) if v is not None]
             if len(valid) < 2: continue
@@ -694,9 +698,18 @@ def main():
                 y = pad_t + plot_h * (1 - min(max(v, 0), 100) / 100)
                 coords += [x, y]
             canvas.create_line(coords, fill=color, width=2)
-            lx, ly = coords[-2], coords[-1]
-            canvas.create_text(min(lx+4, w-4), ly + idx*10,
-                               text=f"{valid[-1][1]:.0f}°",
+            raw_labels.append((coords[-1], valid[-1][1], color))
+        raw_labels.sort(key=lambda e: e[0])
+        placed = []
+        for ideal_y, val, color in raw_labels:
+            y_label = ideal_y
+            for prev_y in placed:
+                if abs(y_label - prev_y) < label_min_gap:
+                    y_label = prev_y + label_min_gap
+            y_label = max(pad_t + 4, min(y_label, height - pad_b - 4))
+            placed.append(y_label)
+            canvas.create_text(label_x, y_label,
+                               text=f"{val:.0f}°",
                                fill=color, font=("Segoe UI", 8, "bold"), anchor="w")
 
     def draw_graph_on(canvas, height):
@@ -804,7 +817,7 @@ def main():
     ACCENT_STRESS = _t.ACCENT_STRESS
     COL_CPU       = _t.COL_CPU
     COL_GPU       = _t.COL_GPU
-    GPU_TEMP_COLORS = {"Core": COL_GPU, "Hotspot": "#f59e0b", "VRAM": "#a855f7"}
+    GPU_TEMP_COLORS = {"Core": COL_GPU, "Hotspot": "#f87171", "VRAM": "#fb923c"}
 
     # ── Header builder (replaces three identical copy-paste blocks) ──────────
     def _build_header(win, subtitle, subtitle_color, show_toolbar=True):
@@ -987,8 +1000,8 @@ def main():
         cpu_stats_f.pack(anchor="center", pady=(4, 0))
         cpu_clock_lbl, cpu_power_lbl, cpu_voltage_lbl = stat_strip(cpu_stats_f, [
             ("CLOCK",   ACCENT_CPU),
-            ("POWER",   ACCENT_CPU),
-            ("VOLTAGE", "#a855f7"),
+            ("POWER",   "#f87171"),
+            ("VOLTAGE", "#22d3ee"),
         ])
         cpu_diag_lbl = tk.Label(cpu_rings_col, text="", fg="#f59e0b", bg=BLOCK_BG,
                                 font=("Segoe UI", 8), wraplength=300)
@@ -1049,16 +1062,16 @@ def main():
                     sr1.pack(anchor="center", pady=(8, 0))
                     gs1 = stat_strip(sr1, [
                         ("CORE CLOCK", acc),
-                        ("VRAM USED",  "#a855f7"),
-                        ("POWER",      acc),
+                        ("VRAM USED",  "#fbbf24"),
+                        ("POWER",      "#f87171"),
                     ])
                     # Stat strip row 2
                     sr2 = tk.Frame(gpu_rings_col, bg=BLOCK_BG)
                     sr2.pack(anchor="center", pady=(4, 0))
                     gs2 = stat_strip(sr2, [
-                        ("HOTSPOT",   "#f59e0b"),
-                        ("VRAM TEMP", "#f59e0b"),
-                        ("VOLTAGE",   "#a855f7"),
+                        ("HOTSPOT",   "#f87171"),
+                        ("VRAM TEMP", "#fb923c"),
+                        ("VOLTAGE",   "#22d3ee"),
                     ])
 
                     # ── Graph side (right) — hidden until temp exists ─────────
@@ -1112,8 +1125,8 @@ def main():
         ram_stats_f.pack(anchor="center", pady=(4, 0))
         ram_used_lbl, ram_free_lbl, ram_clock_lbl = stat_strip(ram_stats_f, [
             ("USED",      ACCENT_RAM),
-            ("AVAILABLE", "#22c55e"),
-            ("SPEED",     "#a855f7"),
+            ("AVAILABLE", "#a78bfa"),
+            ("SPEED",     "#c4b5fd"),
         ])
         _, ram_bar = make_bar(ram_rings_col, ACCENT_RAM, BORDER)
 
@@ -1153,7 +1166,15 @@ def main():
         right = tk.Frame(iw_canvas, bg=BG)
         iw_win_id = iw_canvas.create_window((0, 0), window=right, anchor="nw")
         iw_canvas.bind("<Configure>", lambda e: iw_canvas.itemconfig(iw_win_id, width=e.width))
-        right.bind("<Configure>", lambda e: iw_canvas.configure(scrollregion=iw_canvas.bbox("all")))
+        def _iw_sync_scrollregion(e=None):
+            bbox = iw_canvas.bbox("all")
+            if not bbox:
+                return
+            pos = iw_canvas.yview()[0]
+            iw_canvas.configure(scrollregion=bbox)
+            if pos > 0:
+                iw_canvas.yview_moveto(pos)
+        right.bind("<Configure>", _iw_sync_scrollregion)
         iw_canvas.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         info_win.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         right.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
@@ -1320,10 +1341,10 @@ def main():
             cpu_clock_lbl.config(text=fmt_clock(cpu_clock), fg=clock_color(cpu_clock))
             cpu_power_lbl.config(
                 text=f"{cpu_power:.1f} W" if cpu_power is not None else "N/A",
-                fg=ACCENT_CPU if cpu_power is not None else "#4a5568")
+                fg="#f87171" if cpu_power is not None else "#4a5568")
             cpu_voltage_lbl.config(
                 text=f"{cpu_voltage:.3f} V" if cpu_voltage is not None else "N/A",
-                fg="#a855f7" if cpu_voltage is not None else "#4a5568")
+                fg="#22d3ee" if cpu_voltage is not None else "#4a5568")
 
             ram = psutil.virtual_memory()
             ram_clocks = bridge.find_all_sensors("memory", "", "Clock")
@@ -1454,10 +1475,10 @@ def main():
                             fg=acc if g_clock is not None else "#4a5568")
                         lbls["vram"].config(
                             text=f"{g_vram:.0f} MB" if g_vram is not None else "N/A",
-                            fg="#a855f7" if g_vram is not None else "#4a5568")
+                            fg="#fbbf24" if g_vram is not None else "#4a5568")
                         lbls["power"].config(
                             text=f"{g_power:.1f} W" if g_power is not None else "N/A",
-                            fg=acc if g_power is not None else "#4a5568")
+                            fg="#f87171" if g_power is not None else "#4a5568")
                         lbls["hotspot"].config(
                             text=f"{g_hotspot:.0f}°C" if g_hotspot is not None else "N/A",
                             fg=temp_color(g_hotspot) if g_hotspot is not None else "#4a5568")
@@ -1466,7 +1487,7 @@ def main():
                             fg=temp_color(g_vram_t) if g_vram_t is not None else "#4a5568")
                         lbls["voltage"].config(
                             text=f"{g_voltage:.3f} V" if g_voltage is not None else "N/A",
-                            fg="#a855f7" if g_voltage is not None else "#4a5568")
+                            fg="#22d3ee" if g_voltage is not None else "#4a5568")
                         # Graph — only show when at least one temp exists
                         any_temp = any(v is not None for v in [g_temp, g_hotspot, g_vram_t])
                         if any_temp:
@@ -1525,7 +1546,7 @@ def main():
                                 v.pack(side="right", padx=(0,18))
                                 return v
                             sec_load_lbl[0] = _srow("Load",      info["acc"])
-                            sec_vram_lbl[0] = _srow("VRAM Used", "#a855f7")
+                            sec_vram_lbl[0] = _srow("VRAM Used", "#fbbf24")
                         if sec_load_lbl[0]:
                             sec_load_lbl[0].config(text=f"{g_usage:.0f}%" if g_usage is not None else "N/A")
                             sec_vram_lbl[0].config(text=f"{g_vram:.0f} MB" if g_vram is not None else "N/A")
