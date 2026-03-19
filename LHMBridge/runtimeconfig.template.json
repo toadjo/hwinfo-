@@ -1,0 +1,6 @@
+{
+  "configProperties": {
+    "System.Runtime.Loader.UseRidCompatibilityFallback": false
+  },
+  "rollForward": "Major"
+}

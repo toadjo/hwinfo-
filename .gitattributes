@@ -1,0 +1,8 @@
+* text=auto
+
+*.bat text eol=crlf
+*.cs text diff=csharp
+*.csproj text
+*.dll binary
+*.exe binary
+*.pdb binary
