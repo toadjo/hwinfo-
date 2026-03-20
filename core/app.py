@@ -579,6 +579,7 @@ def main():
         _letter_to_disk = {}
 
     graph_cpu_temps  = collections.deque(maxlen=GRAPH_SECONDS)
+    graph_gpu_temps  = collections.deque(maxlen=GRAPH_SECONDS)
     graph_gpu_series = {}
     # GPU_TEMP_COLORS built after theme resolved (COL_GPU not yet available here)
     GPU_TEMP_COLORS  = {}
@@ -862,25 +863,37 @@ def main():
         sensors_root = None
         stress_root = root
 
-    else:  # both
-        root.title(f"HWInfo Monitor {APP_VERSION} - Sensors")
-        root.geometry("1100x740")
+    else:  # both — single window, split left/right
+        root.title(f"HWInfo Monitor {APP_VERSION} - Sensors + Stress Test")
+        root.geometry("2500x974")
         root.geometry("+0+0")
-        status_label = _build_header(root, "Sensors", COL_CPU)
+        status_label = _build_header(root, "Sensors + Stress Test", COL_CPU)
 
-        stress_win = tk.Toplevel(root)
-        stress_win.title(f"HWInfo Monitor {APP_VERSION} - Stress Test")
-        stress_win.geometry("1100x740")
-        stress_win.geometry("+1110+0")
-        stress_win.configure(bg=BG)
-        stress_win.resizable(True, True)
-        # Stress window has no toolbar (Settings/Raw Sensors belong to the
-        # sensors window; stress window gets its own status label only)
-        stress_status_label = _build_header(stress_win, "Stress Test",
-                                            "#ff6644", show_toolbar=False)
+        split_frame = tk.Frame(root, bg=BG)
+        split_frame.pack(fill="both", expand=True)
 
-        sensors_root = root
-        stress_root = stress_win
+        sensors_pane = tk.Frame(split_frame, bg=BG)
+        sensors_pane.pack(side="left", fill="both", expand=True)
+
+        divider = tk.Frame(split_frame, bg="#2a2a3a", width=4, cursor="sb_h_double_arrow")
+        divider.pack(side="left", fill="y")
+
+        stress_pane = tk.Frame(split_frame, bg=BG)
+        stress_pane.pack(side="left", fill="both", expand=True)
+
+        _drag = {"x": 0}
+        def _div_press(e): _drag["x"] = e.x_root
+        def _div_drag(e):
+            dx = e.x_root - _drag["x"]; _drag["x"] = e.x_root
+            new_w = sensors_pane.winfo_width() + dx
+            if 400 < new_w < root.winfo_width() - 400:
+                sensors_pane.config(width=new_w)
+                sensors_pane.pack_propagate(False)
+        divider.bind("<ButtonPress-1>",   _div_press)
+        divider.bind("<B1-Motion>",       _div_drag)
+
+        sensors_root = sensors_pane
+        stress_root  = stress_pane
 
     if app_mode in ("sensors", "both"):
         s_canvas = tk.Canvas(sensors_root, bg=BG, highlightthickness=0)
@@ -1141,141 +1154,167 @@ def main():
 
         tk.Frame(left, bg=BG, height=12).pack()
 
-        # ── INFO WINDOW — separate Toplevel ──────────────────────────────────
-        info_win = tk.Toplevel()   # no parent → independent window
-        info_win.title(f"HWInfo Monitor {APP_VERSION} - Info")
-        info_win.configure(bg=BG)
-        info_win.resizable(True, True)
-        info_win.geometry("340x740+1110+0")
+        # ── INFO WINDOW — separate Toplevel (sensors mode only) ─────────────
+        if app_mode == "sensors":
+            info_win = tk.Toplevel()
+            info_win.title(f"HWInfo Monitor {APP_VERSION} - Info")
+            info_win.configure(bg=BG)
+            info_win.resizable(True, True)
+            info_win.geometry("340x740+1110+0")
+        else:
+            info_win = None
 
-        # Closing info → just destroy info, main keeps running
-        info_win.protocol("WM_DELETE_WINDOW", info_win.destroy)
+        if info_win is not None:
+            # Closing info → just hide, main keeps running
+            info_win.protocol("WM_DELETE_WINDOW", info_win.destroy)
 
-        # Closing main → destroy both
+        # Closing main → destroy everything
         def _on_main_close():
-            try: info_win.destroy()
+            try:
+                if info_win: info_win.destroy()
             except Exception: pass
-            sensors_root.destroy()
-        sensors_root.protocol("WM_DELETE_WINDOW", _on_main_close)
+            root.destroy()
+        (sensors_root if hasattr(sensors_root, "protocol") else root).protocol("WM_DELETE_WINDOW", _on_main_close)
 
-        iw_canvas = tk.Canvas(info_win, bg=BG, highlightthickness=0)
-        iw_sb = tk.Scrollbar(info_win, orient="vertical", command=iw_canvas.yview)
-        iw_canvas.configure(yscrollcommand=iw_sb.set)
-        iw_sb.pack(side="right", fill="y")
-        iw_canvas.pack(side="left", fill="both", expand=True)
-        right = tk.Frame(iw_canvas, bg=BG)
-        iw_win_id = iw_canvas.create_window((0, 0), window=right, anchor="nw")
-        iw_canvas.bind("<Configure>", lambda e: iw_canvas.itemconfig(iw_win_id, width=e.width))
-        def _iw_sync_scrollregion(e=None):
-            bbox = iw_canvas.bbox("all")
-            if not bbox:
-                return
-            pos = iw_canvas.yview()[0]
-            iw_canvas.configure(scrollregion=bbox)
-            if pos > 0:
-                iw_canvas.yview_moveto(pos)
-        right.bind("<Configure>", _iw_sync_scrollregion)
-        iw_canvas.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        info_win.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        right.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        if info_win is not None:
+            iw_canvas = tk.Canvas(info_win, bg=BG, highlightthickness=0)
+            iw_sb = tk.Scrollbar(info_win, orient="vertical", command=iw_canvas.yview)
+            iw_canvas.configure(yscrollcommand=iw_sb.set)
+            iw_sb.pack(side="right", fill="y")
+            iw_canvas.pack(side="left", fill="both", expand=True)
+            right = tk.Frame(iw_canvas, bg=BG)
+            iw_win_id = iw_canvas.create_window((0, 0), window=right, anchor="nw")
+            iw_canvas.bind("<Configure>", lambda e: iw_canvas.itemconfig(iw_win_id, width=e.width))
+            def _iw_sync_scrollregion(e=None):
+                bbox = iw_canvas.bbox("all")
+                if not bbox:
+                    return
+                pos = iw_canvas.yview()[0]
+                iw_canvas.configure(scrollregion=bbox)
+                if pos > 0:
+                    iw_canvas.yview_moveto(pos)
+            right.bind("<Configure>", _iw_sync_scrollregion)
+            iw_canvas.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+            info_win.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+            right.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+    
+            def _bind_mousewheel_recursive(widget):
+                widget.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+                for child in widget.winfo_children():
+                    _bind_mousewheel_recursive(child)
+    
+            # Re-bind after all widgets are created
+            info_win.after(500, lambda: _bind_mousewheel_recursive(right))
+    
+            ROW_A = "#0d1220"
+            ROW_B = BG
+            _ri = [0]
+    
+            def list_header(icon, title, accent):
+                _ri[0] = 0
+                f = tk.Frame(right, bg=BG)
+                f.pack(fill="x", padx=16, pady=(20, 6))
+                tk.Label(f, text="●", fg=accent, bg=BG,
+                         font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
+                tk.Label(f, text=title, fg="white", bg=BG,
+                         font=("Segoe UI", 11, "bold")).pack(side="left")
+    
+            def list_row(label, val_color="#aaa"):
+                bg = ROW_A if _ri[0] % 2 == 0 else ROW_B
+                _ri[0] += 1
+                f = tk.Frame(right, bg=bg)
+                f.pack(fill="x", padx=8)
+                tk.Label(f, text=label, fg="#4a5568", bg=bg,
+                         font=("Segoe UI", 9), anchor="w").pack(
+                             side="left", padx=(12, 0), pady=6, fill="x", expand=True)
+                v = tk.Label(f, text="\u2014", fg=val_color, bg=bg,
+                             font=("Segoe UI", 10, "bold"), anchor="e")
+                v.pack(side="right", padx=(0, 16))
+                return v
+    
+            # Secondary GPU section
+            sec_gpu_section = tk.Frame(right, bg=BG)
+            sec_gpu_section.pack(fill="x")
+            sec_gpu_visible = [False]
+            sec_load_lbl = [None]
+            sec_vram_lbl = [None]
+    
+            # RAM details
+            list_header("\U0001f4be", "RAM", ACCENT_RAM)
+            ram_type_lbl    = list_row("Type",        ACCENT_RAM)
+            ram_form_lbl    = list_row("Form Factor", ACCENT_RAM)
+            ram_sticks_lbl  = list_row("Sticks",      ACCENT_RAM)
+            ram_timing_lbl  = list_row("SPD Timings", ACCENT_RAM)
+            ram_voltage_lbl = list_row("Voltage",     ACCENT_RAM)
+    
+            # Network
+            list_header("\U0001f310", "Network", ACCENT_NET)
+            net_up_lbl   = list_row("Upload",   ACCENT_NET)
+            net_down_lbl = list_row("Download", ACCENT_NET)
+    
+            # System
+            list_header("\u2699", "System", ACCENT_SYS)
+            sys_host_lbl    = list_row("Hostname",   "#e2e8f0")
+            sys_os_lbl      = list_row("OS",         "#e2e8f0")
+            sys_ver_lbl     = list_row("Version",    "#e2e8f0")
+            sys_build_lbl   = list_row("Build",      "#e2e8f0")
+            sys_gpu_drv_lbl = list_row("GPU Driver", "#e2e8f0")
+            sys_uptime_lbl  = list_row("Uptime",     "#e2e8f0")
+            sys_host_lbl.config(text=socket.gethostname())
+            sys_os_lbl.config(text=win_ver)
+            sys_ver_lbl.config(text=win_ver_name if win_ver_name else "\u2014")
+            sys_build_lbl.config(text=win_build if win_build else "\u2014")
+            sys_gpu_drv_lbl.config(text=gpu_driver)
+    
+            # Fans
+            list_header("\U0001f300", "Fans", ACCENT_FAN)
+            fan_frame = tk.Frame(right, bg=BG)
+            fan_frame.pack(fill="x", padx=8)
+    
+            # Storage
+            list_header("\U0001f4bf", "Storage", ACCENT_DISK)
+            disk_frames = {}
+            for i, disk in enumerate(all_disks):
+                dh = tk.Frame(right, bg=BG)
+                dh.pack(fill="x", padx=20, pady=(8, 2))
+                tk.Label(dh, text=f"{disk['model'][:30]}  \u00b7  {disk['type']}  \u00b7  {disk['size']} GB",
+                         fg="#4a5568", bg=BG, font=("Segoe UI", 8)).pack(side="left")
+                _ri[0] = 0
+                h_lbl   = list_row("Health",         "#22c55e")
+                t_lbl   = list_row("Temp",           "#f59e0b")
+                r_lbl   = list_row("Read",           "#6b7280")
+                w_lbl   = list_row("Written",        "#6b7280")
+                poh_lbl = list_row("Power-On Hours", "#6b7280")
+                pf = tk.Frame(right, bg=BG, padx=20)
+                pf.pack(fill="x", pady=(4, 0))
+                disk_frames[i] = {
+                    "health": h_lbl, "temp": t_lbl,
+                    "read": r_lbl, "write": w_lbl,
+                    "poh": poh_lbl,
+                    "parts_frame": pf,
+                }
+    
+            tk.Frame(right, bg=BG, height=20).pack()
 
-        def _bind_mousewheel_recursive(widget):
-            widget.bind("<MouseWheel>", lambda e: iw_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-            for child in widget.winfo_children():
-                _bind_mousewheel_recursive(child)
-
-        # Re-bind after all widgets are created
-        info_win.after(500, lambda: _bind_mousewheel_recursive(right))
-
-        ROW_A = "#0d1220"
-        ROW_B = BG
-        _ri = [0]
-
-        def list_header(icon, title, accent):
-            _ri[0] = 0
-            f = tk.Frame(right, bg=BG)
-            f.pack(fill="x", padx=16, pady=(20, 6))
-            tk.Label(f, text="●", fg=accent, bg=BG,
-                     font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
-            tk.Label(f, text=title, fg="white", bg=BG,
-                     font=("Segoe UI", 11, "bold")).pack(side="left")
-
-        def list_row(label, val_color="#aaa"):
-            bg = ROW_A if _ri[0] % 2 == 0 else ROW_B
-            _ri[0] += 1
-            f = tk.Frame(right, bg=bg)
-            f.pack(fill="x", padx=8)
-            tk.Label(f, text=label, fg="#4a5568", bg=bg,
-                     font=("Segoe UI", 9), anchor="w").pack(
-                         side="left", padx=(12, 0), pady=6, fill="x", expand=True)
-            v = tk.Label(f, text="\u2014", fg=val_color, bg=bg,
-                         font=("Segoe UI", 10, "bold"), anchor="e")
-            v.pack(side="right", padx=(0, 16))
-            return v
-
-        # Secondary GPU section
-        sec_gpu_section = tk.Frame(right, bg=BG)
-        sec_gpu_section.pack(fill="x")
-        sec_gpu_visible = [False]
-        sec_load_lbl = [None]
-        sec_vram_lbl = [None]
-
-        # RAM details
-        list_header("\U0001f4be", "RAM", ACCENT_RAM)
-        ram_type_lbl    = list_row("Type",        ACCENT_RAM)
-        ram_form_lbl    = list_row("Form Factor", ACCENT_RAM)
-        ram_sticks_lbl  = list_row("Sticks",      ACCENT_RAM)
-        ram_timing_lbl  = list_row("SPD Timings", ACCENT_RAM)
-        ram_voltage_lbl = list_row("Voltage",     ACCENT_RAM)
-
-        # Network
-        list_header("\U0001f310", "Network", ACCENT_NET)
-        net_up_lbl   = list_row("Upload",   ACCENT_NET)
-        net_down_lbl = list_row("Download", ACCENT_NET)
-
-        # System
-        list_header("\u2699", "System", ACCENT_SYS)
-        sys_host_lbl    = list_row("Hostname",   "#e2e8f0")
-        sys_os_lbl      = list_row("OS",         "#e2e8f0")
-        sys_ver_lbl     = list_row("Version",    "#e2e8f0")
-        sys_build_lbl   = list_row("Build",      "#e2e8f0")
-        sys_gpu_drv_lbl = list_row("GPU Driver", "#e2e8f0")
-        sys_uptime_lbl  = list_row("Uptime",     "#e2e8f0")
-        sys_host_lbl.config(text=socket.gethostname())
-        sys_os_lbl.config(text=win_ver)
-        sys_ver_lbl.config(text=win_ver_name if win_ver_name else "\u2014")
-        sys_build_lbl.config(text=win_build if win_build else "\u2014")
-        sys_gpu_drv_lbl.config(text=gpu_driver)
-
-        # Fans
-        list_header("\U0001f300", "Fans", ACCENT_FAN)
-        fan_frame = tk.Frame(right, bg=BG)
-        fan_frame.pack(fill="x", padx=8)
-
-        # Storage
-        list_header("\U0001f4bf", "Storage", ACCENT_DISK)
-        disk_frames = {}
-        for i, disk in enumerate(all_disks):
-            dh = tk.Frame(right, bg=BG)
-            dh.pack(fill="x", padx=20, pady=(8, 2))
-            tk.Label(dh, text=f"{disk['model'][:30]}  \u00b7  {disk['type']}  \u00b7  {disk['size']} GB",
-                     fg="#4a5568", bg=BG, font=("Segoe UI", 8)).pack(side="left")
-            _ri[0] = 0
-            h_lbl   = list_row("Health",         "#22c55e")
-            t_lbl   = list_row("Temp",           "#f59e0b")
-            r_lbl   = list_row("Read",           "#6b7280")
-            w_lbl   = list_row("Written",        "#6b7280")
-            poh_lbl = list_row("Power-On Hours", "#6b7280")
-            pf = tk.Frame(right, bg=BG, padx=20)
-            pf.pack(fill="x", pady=(4, 0))
-            disk_frames[i] = {
-                "health": h_lbl, "temp": t_lbl,
-                "read": r_lbl, "write": w_lbl,
-                "poh": poh_lbl,
-                "parts_frame": pf,
-            }
-
-        tk.Frame(right, bg=BG, height=20).pack()
+        # Stubs for both-mode (no info_win) so update_sensors doesn't crash
+        if info_win is None:
+            class _Noop:
+                def config(self, **kw): pass
+                def winfo_children(self): return []
+                def destroy(self): pass
+                def pack(self, **kw): pass
+            _n = _Noop
+            ROW_A = "#0d1220"
+            ROW_B = BG
+            ram_type_lbl = ram_form_lbl = ram_sticks_lbl = ram_timing_lbl = ram_voltage_lbl = _n()
+            net_up_lbl = net_down_lbl = _n()
+            sys_host_lbl = sys_os_lbl = sys_ver_lbl = sys_build_lbl = sys_gpu_drv_lbl = sys_uptime_lbl = _n()
+            fan_frame = _n()
+            disk_frames = {}
+            sec_gpu_section = _n()
+            sec_gpu_visible = [False]
+            sec_load_lbl = [_n()]
+            sec_vram_lbl = [_n()]
 
         _last_net = [None]  # stores previous net_io_counters() snapshot
 
@@ -1519,7 +1558,7 @@ def main():
                                              font=("Segoe UI", 7, "bold")).pack(side="left", padx=(0,8))
                             draw_multi_graph(lbls["graph_canvas"], series, 170)
                     # Secondary GPU → right panel compact section
-                    if not lbls.get("primary", False):
+                    if not lbls.get("primary", False) and info_win is not None:
                         if not sec_gpu_visible[0] and gpu_secondary:
                             sec_gpu_visible[0] = True
                             info = gpu_secondary[0]
@@ -1551,106 +1590,108 @@ def main():
                             sec_load_lbl[0].config(text=f"{g_usage:.0f}%" if g_usage is not None else "N/A")
                             sec_vram_lbl[0].config(text=f"{g_vram:.0f} MB" if g_vram is not None else "N/A")
 
-            for w in fan_frame.winfo_children():
-                w.destroy()
-            fans = bridge.find_all_fans()
-            if fans:
-                for fi, (fname, fval) in enumerate(fans):
-                    bg = ROW_A if fi % 2 == 0 else ROW_B
-                    row = tk.Frame(fan_frame, bg=bg)
-                    row.pack(fill="x")
-                    # RPM value first (right-anchored) so it's never clipped
-                    txt = f"{fval:.0f} RPM" if fval > 0 else "0 RPM"
-                    tk.Label(row, text=txt, fg=ACCENT_FAN if fval > 0 else "#4a5568",
-                             bg=bg, font=("Segoe UI", 10, "bold"),
-                             width=10, anchor="e").pack(side="right", padx=(0,16))
-                    # Name — truncate if too long
-                    display_name = fname if len(fname) <= 22 else fname[:21] + "…"
-                    tk.Label(row, text=display_name, fg="#6b7280", bg=bg,
-                             font=("Segoe UI", 9), anchor="w").pack(
-                                 side="left", padx=(12,0), pady=6)
-            else:
-                tk.Label(fan_frame, text="No fan sensors found", fg="#4a5568",
-                         bg=BG, font=("Segoe UI", 9), padx=12).pack(anchor="w", pady=6)
-
-            storage_keys = sorted([k for k in bridge.data if "storage" in k.lower()])
-            for i in range(len(all_disks)):
-                if i not in disk_frames:
-                    continue
-                lbls = disk_frames[i]
-                sensors = bridge.data.get(storage_keys[i], []) if i < len(storage_keys) else []
-                health = (
-                    bridge.sensor_value_in(sensors, ["Remaining Life"], "Level") or
-                    bridge.sensor_value_in(sensors, ["Percentage Used"], "Level") or
-                    bridge.sensor_value_in(sensors, ["Health", "Life"], "Level")
-                )
-                # Convert "Percentage Used" to remaining life
-                if health is not None:
-                    pu = bridge.sensor_value_in(sensors, ["Percentage Used"], "Level")
-                    if pu is not None and health == pu:
-                        health = max(0, 100 - pu)
-                temp   = bridge.sensor_value_in(sensors, ["Temperature", "Composite"], "Temperature")
-                read   = bridge.sensor_value_in(sensors, ["Total Bytes Read", "Data Read"], "Data")
-                write  = bridge.sensor_value_in(sensors, ["Total Bytes Written", "Data Written"], "Data")
-                poh    = (
-                    bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "TimeSpan") or
-                    bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "Data") or
-                    bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "Factor") or
-                    bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "SmallData")
-                )
-
-                lbls["health"].config(text=f"{health:.0f}%" if health is not None else "N/A", fg=health_color(health))
-                lbls["temp"].config(text=f"{temp:.0f}°C" if temp is not None else "N/A", fg=temp_color(temp))
-                lbls["read"].config(text=fmt_data(read), fg="#6b7280")
-                lbls["write"].config(text=fmt_data(write), fg="#6b7280")
-                if poh is not None:
-                    poh_days  = int(poh) // 24
-                    poh_hours = int(poh) % 24
-                    poh_str   = f"{poh_days}d {poh_hours}h" if poh_days > 0 else f"{poh_hours}h"
-                    lbls["poh"].config(text=poh_str, fg="#6b7280")
-                else:
-                    lbls["poh"].config(text="N/A", fg="#4a5568")
-
-                # Rebuild partition bar rows
-                pf = lbls["parts_frame"]
-                for w in pf.winfo_children():
+            if info_win is not None:
+                for w in fan_frame.winfo_children():
                     w.destroy()
-                try:
-                    disk_idx = all_disks[i]["index"]
-                    for part in psutil.disk_partitions():
-                        letter = part.device.rstrip("\\").upper()
-                        if _letter_to_disk and _letter_to_disk.get(letter, -1) != disk_idx:
-                            continue
-                        try:
-                            u    = psutil.disk_usage(part.mountpoint)
-                            pct  = u.percent
-                            used = u.used  / 1024**3
-                            tot  = u.total / 1024**3
-                            bar_col = ("#22c55e" if pct < 70
-                                       else "#f59e0b" if pct < 88
-                                       else "#ef4444")
-                            row = tk.Frame(pf, bg=BG)
-                            row.pack(fill="x", pady=(3, 0))
-                            tk.Label(row, text=letter, fg="white", bg=BG,
-                                     font=("Segoe UI", 10, "bold"),
-                                     width=4, anchor="w").pack(side="left")
-                            tk.Label(row, text=f"{used:.0f} / {tot:.0f} GB",
-                                     fg="#6b7280", bg=BG,
-                                     font=("Segoe UI", 9)).pack(side="left", expand=True)
-                            tk.Label(row, text=f"{pct:.0f}%",
-                                     fg=bar_col, bg=BG,
-                                     font=("Segoe UI", 10, "bold"),
-                                     width=5, anchor="e").pack(side="right")
-                            track = tk.Frame(pf, bg=BORDER, height=3)
-                            track.pack(fill="x", pady=(1, 2))
-                            track.pack_propagate(False)
-                            fill_f = tk.Frame(track, bg=bar_col, height=3)
-                            fill_f.place(x=0, y=0, relheight=1.0,
-                                       relwidth=max(0.01, min(pct / 100, 1.0)))
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                fans = bridge.find_all_fans()
+                if fans:
+                    for fi, (fname, fval) in enumerate(fans):
+                        bg = ROW_A if fi % 2 == 0 else ROW_B
+                        row = tk.Frame(fan_frame, bg=bg)
+                        row.pack(fill="x")
+                        # RPM value first (right-anchored) so it's never clipped
+                        txt = f"{fval:.0f} RPM" if fval > 0 else "0 RPM"
+                        tk.Label(row, text=txt, fg=ACCENT_FAN if fval > 0 else "#4a5568",
+                                 bg=bg, font=("Segoe UI", 10, "bold"),
+                                 width=10, anchor="e").pack(side="right", padx=(0,16))
+                        # Name — truncate if too long
+                        display_name = fname if len(fname) <= 22 else fname[:21] + "…"
+                        tk.Label(row, text=display_name, fg="#6b7280", bg=bg,
+                                 font=("Segoe UI", 9), anchor="w").pack(
+                                     side="left", padx=(12,0), pady=6)
+                else:
+                    tk.Label(fan_frame, text="No fan sensors found", fg="#4a5568",
+                             bg=BG, font=("Segoe UI", 9), padx=12).pack(anchor="w", pady=6)
+    
+                storage_keys = sorted([k for k in bridge.data if "storage" in k.lower()])
+                for i in range(len(all_disks)):
+                    if i not in disk_frames:
+                        continue
+                    lbls = disk_frames[i]
+                    sensors = bridge.data.get(storage_keys[i], []) if i < len(storage_keys) else []
+                    health = (
+                        bridge.sensor_value_in(sensors, ["Remaining Life"], "Level") or
+                        bridge.sensor_value_in(sensors, ["Percentage Used"], "Level") or
+                        bridge.sensor_value_in(sensors, ["Health", "Life"], "Level")
+                    )
+                    # Convert "Percentage Used" to remaining life
+                    if health is not None:
+                        pu = bridge.sensor_value_in(sensors, ["Percentage Used"], "Level")
+                        if pu is not None and health == pu:
+                            health = max(0, 100 - pu)
+                    temp   = bridge.sensor_value_in(sensors, ["Temperature", "Composite"], "Temperature")
+                    read   = bridge.sensor_value_in(sensors, ["Total Bytes Read", "Data Read"], "Data")
+                    write  = bridge.sensor_value_in(sensors, ["Total Bytes Written", "Data Written"], "Data")
+                    poh    = (
+                        bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "TimeSpan") or
+                        bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "Data") or
+                        bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "Factor") or
+                        bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "SmallData")
+                    )
+    
+                    lbls["health"].config(text=f"{health:.0f}%" if health is not None else "N/A", fg=health_color(health))
+                    lbls["temp"].config(text=f"{temp:.0f}°C" if temp is not None else "N/A", fg=temp_color(temp))
+                    lbls["read"].config(text=fmt_data(read), fg="#6b7280")
+                    lbls["write"].config(text=fmt_data(write), fg="#6b7280")
+                    if poh is not None:
+                        poh_days  = int(poh) // 24
+                        poh_hours = int(poh) % 24
+                        poh_str   = f"{poh_days}d {poh_hours}h" if poh_days > 0 else f"{poh_hours}h"
+                        lbls["poh"].config(text=poh_str, fg="#6b7280")
+                    else:
+                        lbls["poh"].config(text="N/A", fg="#4a5568")
+    
+                    # Rebuild partition bar rows
+                    pf = lbls["parts_frame"]
+                    for w in pf.winfo_children():
+                        w.destroy()
+                    try:
+                        disk_idx = all_disks[i]["index"]
+                        for part in psutil.disk_partitions():
+                            letter = part.device.rstrip("\\").upper()
+                            if _letter_to_disk and _letter_to_disk.get(letter, -1) != disk_idx:
+                                continue
+                            try:
+                                u    = psutil.disk_usage(part.mountpoint)
+                                pct  = u.percent
+                                used = u.used  / 1024**3
+                                tot  = u.total / 1024**3
+                                bar_col = ("#22c55e" if pct < 70
+                                           else "#f59e0b" if pct < 88
+                                           else "#ef4444")
+                                row = tk.Frame(pf, bg=BG)
+                                row.pack(fill="x", pady=(3, 0))
+                                tk.Label(row, text=letter, fg="white", bg=BG,
+                                         font=("Segoe UI", 10, "bold"),
+                                         width=4, anchor="w").pack(side="left")
+                                tk.Label(row, text=f"{used:.0f} / {tot:.0f} GB",
+                                         fg="#6b7280", bg=BG,
+                                         font=("Segoe UI", 9)).pack(side="left", expand=True)
+                                tk.Label(row, text=f"{pct:.0f}%",
+                                         fg=bar_col, bg=BG,
+                                         font=("Segoe UI", 10, "bold"),
+                                         width=5, anchor="e").pack(side="right")
+                                track = tk.Frame(pf, bg=BORDER, height=3)
+                                track.pack(fill="x", pady=(1, 2))
+                                track.pack_propagate(False)
+                                fill_f = tk.Frame(track, bg=bar_col, height=3)
+                                fill_f.place(x=0, y=0, relheight=1.0,
+                                           relwidth=max(0.01, min(pct / 100, 1.0)))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
 
             try:
                 n_now = psutil.net_io_counters()
@@ -1696,102 +1737,217 @@ def main():
         stress_status_label = status_label
 
     if app_mode in ("stress", "both"):
-        st_canvas = tk.Canvas(stress_root, bg=BG, highlightthickness=0)
-        st_sb = tk.Scrollbar(stress_root, orient="vertical", command=st_canvas.yview)
-        st_canvas.configure(yscrollcommand=st_sb.set)
-        st_sb.pack(side="right", fill="y")
-        st_canvas.pack(side="left", fill="both", expand=True)
 
-        stf = tk.Frame(st_canvas, bg=BG)
-        st_canvas.create_window((0, 0), window=stf, anchor="nw")
-        stf.bind("<Configure>", lambda e: st_canvas.configure(scrollregion=st_canvas.bbox("all")))
-        st_canvas.bind_all("<MouseWheel>", lambda e: st_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        # ── Tab bar ────────────────────────────────────────────
+        tab_bar = tk.Frame(stress_root, bg="#0d0d1a", height=44)
+        tab_bar.pack(fill="x", side="top")
+        tab_bar.pack_propagate(False)
 
-        for c in range(2):
-            stf.columnconfigure(c, weight=1)
+        content = tk.Frame(stress_root, bg=BG)
+        content.pack(fill="both", expand=True)
 
-        gc2, gi2, _ = make_card(stf, "Live Temperatures (60s)", "🌡", ACCENT_CPU, CARD, BORDER)
-        gc2.grid(row=0, column=0, columnspan=2, padx=8, pady=6, sticky="nsew")
+        _tabs = {}
+        _tab_btns = {}
 
-        leg2 = tk.Frame(gi2, bg=CARD)
-        leg2.pack(anchor="w", pady=(0, 4))
-        tk.Label(leg2, text="CPU", fg=COL_CPU, bg=CARD, font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 16))
-        tk.Label(leg2, text="GPU", fg=COL_GPU, bg=CARD, font=("Segoe UI", 9, "bold")).pack(side="left")
+        def _show_tab(tab_name):
+            for n, d in _tabs.items():
+                d["menu"].place_forget()
+                d["active"].place_forget()
+            page = _tabs[tab_name]["page"][0]
+            _tabs[tab_name][page].place(relx=0, rely=0, relwidth=1, relheight=1)
+            for n, b in _tab_btns.items():
+                b.config(bg="#1e1e3a" if n == tab_name else "#0d0d1a",
+                         fg="white"   if n == tab_name else "#555",
+                         relief="flat")
 
-        g_canvas2 = tk.Canvas(gi2, bg=GRAPH_BG, height=130, highlightthickness=1, highlightbackground="#333")
-        g_canvas2.pack(fill="x", expand=True)
-        g_canvas2.bind("<Configure>", lambda e: draw_graph_on(g_canvas2, 130))
+        def _show_page_in_tab(tab_name, page):
+            _tabs[tab_name]["page"][0] = page
+            _tabs[tab_name]["menu"].place_forget()
+            _tabs[tab_name]["active"].place_forget()
+            _tabs[tab_name][page].place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        def _make_tab(name, label):
+            b = tk.Button(tab_bar, text=label,
+                          bg="#0d0d1a", fg="#555",
+                          font=("Segoe UI", 11, "bold"),
+                          relief="flat", bd=0,
+                          padx=32, pady=10,
+                          cursor="hand2",
+                          command=lambda n=name: _show_tab(n))
+            b.pack(side="left")
+            _tab_btns[name] = b
+
+        def _build_tab(name):
+            menu_f   = tk.Frame(content, bg=BG)
+            active_f = tk.Frame(content, bg=BG)
+            _tabs[name] = {"menu": menu_f, "active": active_f, "page": ["menu"]}
+
+        _make_tab("cpu", "  CPU Tests  ")
+        _make_tab("gpu", "  GPU Tests  ")
+        _build_tab("cpu")
+        _build_tab("gpu")
 
         stress_log_boxes = {}
+        _active_state = {}
 
-        def make_stress_card_ui(parent, title, icon, accent, row, col, cmd_prefix, colspan=1):
-            start_fn, stop_fn = stress_manager.make_stress_action(cmd_prefix, cmd_prefix)
-            card, inner, _ = make_card(parent, title, icon, accent, CARD, BORDER)
-            card.grid(row=row, column=col, columnspan=colspan, padx=8, pady=6, sticky="nsew")
+        def _build_active_view(tab_name):
+            af = _tabs[tab_name]["active"]
+            af.columnconfigure(0, weight=1)
+            af.rowconfigure(1, weight=1)
 
-            lb = tk.Text(inner, bg="#111", fg="#bbb", font=("Consolas", 9), height=7, bd=0, relief="flat", state="disabled")
-            lb.pack(fill="both", expand=True, pady=(0, 8))
-            stress_log_boxes[cmd_prefix] = lb
+            hdr = tk.Frame(af, bg="#0d0d1a")
+            hdr.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+            tk.Button(hdr, text="< Back",
+                      bg="#0d0d1a", fg="#888",
+                      font=("Segoe UI", 9), relief="flat", bd=0,
+                      padx=12, pady=10, cursor="hand2",
+                      command=lambda t=tab_name: _show_page_in_tab(t, "menu")).pack(side="left")
+
+            title_lbl = tk.Label(hdr, text="", bg="#0d0d1a", fg="white",
+                                 font=("Segoe UI", 12, "bold"))
+            title_lbl.pack(side="left", padx=12)
+
+            stop_btn = tk.Button(hdr, text="  Stop  ",
+                                 bg="#7a0000", fg="white",
+                                 font=("Segoe UI", 10, "bold"),
+                                 relief="flat", padx=12, pady=6,
+                                 cursor="hand2")
+            stop_btn.pack(side="right", padx=12, pady=6)
+
+            log_w = tk.Text(af, bg="#080810", fg="#d0d0d0",
+                            font=("Consolas", 10), bd=0, relief="flat",
+                            state="disabled", wrap="none")
+            log_w.grid(row=1, column=0, sticky="nsew")
+
+            vsb = tk.Scrollbar(af, orient="vertical", command=log_w.yview)
+            vsb.grid(row=1, column=1, sticky="ns")
+            log_w.configure(yscrollcommand=vsb.set)
+
+            _active_state[tab_name] = {
+                "title": title_lbl, "log": log_w, "stop": stop_btn,
+                "log_cb": [None], "stop_fn": [None],
+            }
+
+        _build_active_view("cpu")
+        _build_active_view("gpu")
+
+        def _write_log(tab_name, msg):
+            try:
+                w = _active_state[tab_name]["log"]
+                w.config(state="normal")
+                w.insert("end", f"{msg}\n")
+                w.see("end")
+                w.config(state="disabled")
+            except tk.TclError:
+                pass
+
+        def _launch_test(tab_name, cmd_prefix, title, start_fn, stop_fn):
+            st = _active_state[tab_name]
+            st["log"].config(state="normal")
+            st["log"].delete("1.0", "end")
+            st["log"].config(state="disabled")
+            st["title"].config(text=title)
 
             def log_cb(msg):
                 log_queue.put((cmd_prefix, msg))
 
-            bf = tk.Frame(inner, bg=CARD)
-            bf.pack(fill="x", pady=(4, 0))
-            tk.Button(
-                bf,
-                text="Start",
-                bg="#006633",
-                fg="white",
-                font=("Segoe UI", 10, "bold"),
-                relief="flat",
-                padx=16,
-                pady=6,
-                cursor="hand2",
-                command=lambda: start_fn(log_cb),
-            ).pack(side="left", padx=(0, 8))
-            tk.Button(
-                bf,
-                text="Stop",
-                bg="#660000",
-                fg="white",
-                font=("Segoe UI", 10, "bold"),
-                relief="flat",
-                padx=16,
-                pady=6,
-                cursor="hand2",
-                command=lambda: stop_fn(log_cb),
-            ).pack(side="left")
+            st["log_cb"][0]  = log_cb
+            st["stop_fn"][0] = stop_fn
+            st["stop"].config(command=lambda: stop_fn(log_cb))
+            stress_log_boxes[cmd_prefix] = tab_name
+            start_fn(log_cb)
+            _show_page_in_tab(tab_name, "active")
+            _show_tab(tab_name)
 
-        make_stress_card_ui(stf, "CPU - Single Core",       "🖥", ACCENT_CPU,    1, 0, "cpu_single")
-        make_stress_card_ui(stf, "CPU - Multi Core",         "🖥", "#2563eb",     1, 1, "cpu_multi")
-        make_stress_card_ui(stf, "CPU - Memory Controller",  "💾", ACCENT_RAM,    2, 0, "cpu_memory")
-        make_stress_card_ui(stf, "CPU - Hybrid (Full Load)", "🔥", ACCENT_STRESS, 2, 1, "cpu_hybrid")
-        make_stress_card_ui(stf, "GPU - Core",               "🎮", ACCENT_GPU,    3, 0, "gpu_core")
-        make_stress_card_ui(stf, "GPU - VRAM",               "🎮", "#ea580c",     3, 1, "gpu_vram")
-        make_stress_card_ui(stf, "GPU - Combined",           "🔥", ACCENT_STRESS, 4, 0, "gpu_combined", colspan=2)
-        tk.Frame(stf, bg=BG, height=16).grid(row=5, column=0, columnspan=2)
+        def _build_menu(tab_name, tests):
+            mf  = _tabs[tab_name]["menu"]
+            mc  = tk.Canvas(mf, bg=BG, highlightthickness=0)
+            msb = tk.Scrollbar(mf, orient="vertical", command=mc.yview)
+            mc.configure(yscrollcommand=msb.set)
+            msb.pack(side="right", fill="y")
+            mc.pack(fill="both", expand=True)
+            mi = tk.Frame(mc, bg=BG)
+            mc.create_window((0, 0), window=mi, anchor="nw")
+            mi.bind("<Configure>", lambda e: mc.configure(scrollregion=mc.bbox("all")))
+            mf.bind("<MouseWheel>", lambda e: mc.yview_scroll(int(-1*(e.delta/120)), "units"))
+            mc.bind("<MouseWheel>",  lambda e: mc.yview_scroll(int(-1*(e.delta/120)), "units"))
+            mi.bind("<MouseWheel>",  lambda e: mc.yview_scroll(int(-1*(e.delta/120)), "units"))
 
-        stress_status = stress_status_label if app_mode == "both" else status_label
+            COLS = 4
+            for c in range(COLS):
+                mi.columnconfigure(c, weight=1)
+
+            from collections import OrderedDict
+            sections = OrderedDict()
+            for t in tests:
+                sections.setdefault(t["section"], []).append(t)
+
+            grid_row = 0
+            for sec_name, items in sections.items():
+                tk.Label(mi, text=sec_name, bg=BG, fg="#555",
+                         font=("Segoe UI", 9, "bold")).grid(
+                         row=grid_row, column=0, columnspan=COLS,
+                         sticky="w", padx=16, pady=(18, 4))
+                grid_row += 1
+                for i, t in enumerate(items):
+                    col = i % COLS
+                    if i > 0 and col == 0:
+                        grid_row += 1
+                    start_fn, stop_fn = stress_manager.make_stress_action(t["cmd"], t["cmd"])
+                    stress_log_boxes[t["cmd"]] = None
+                    card = tk.Frame(mi, bg="#0f0f1e",
+                                    highlightbackground=t["accent"],
+                                    highlightthickness=2, cursor="hand2")
+                    card.grid(row=grid_row, column=col, padx=10, pady=8, sticky="nsew", ipady=6)
+                    tk.Label(card, text=t["badge"], bg=t["accent"], fg="white",
+                             font=("Segoe UI", 8, "bold"), padx=8, pady=3).pack(
+                             anchor="nw", padx=10, pady=(10, 4))
+                    tk.Label(card, text=t["title"], bg="#0f0f1e", fg="white",
+                             font=("Segoe UI", 10, "bold"),
+                             wraplength=220, justify="left").pack(anchor="w", padx=10)
+                    tk.Label(card, text=t.get("desc", "Click to start"),
+                             bg="#0f0f1e", fg="#444",
+                             font=("Segoe UI", 8)).pack(anchor="w", padx=10, pady=(2, 10))
+
+                    def on_click(e=None, tn=tab_name, cmd=t["cmd"],
+                                 title=t["title"], sf=start_fn, stf=stop_fn):
+                        _launch_test(tn, cmd, title, sf, stf)
+
+                    card.bind("<Button-1>", on_click)
+                    for w in card.winfo_children():
+                        w.bind("<Button-1>", on_click)
+                grid_row += 1
+            tk.Frame(mi, bg=BG, height=20).grid(row=grid_row, column=0, columnspan=COLS)
+
+        import multiprocessing as _mp
+        _ncores = _mp.cpu_count()
+
+        CPU_TESTS = [
+            {"section": "CPU Stress Tests", "title": "FMA Burn",     "badge": "FMA", "accent": "#7c3aed", "cmd": "p95_small", "desc": "Tight FMA loop, max heat (L1/L2)"},
+            {"section": "CPU Stress Tests", "title": "Cache Bust",   "badge": "L3", "accent": "#0891b2", "cmd": "p95_large", "desc": "Cache-busting loop, max power (L3+DRAM)"},
+            {"section": "CPU Stress Tests", "title": "Memory Flood", "badge": "RAM", "accent": "#d97706", "cmd": "p95_blend", "desc": "256MB RAM flood + FMA, stresses IMC"},
+        ]
+        GPU_TESTS = [
+            {"section": "GPU Stress", "title": "GPU Core",     "badge": "FP32", "accent": ACCENT_GPU,    "cmd": "gpu_core",     "desc": "Float32 compute throughput"},
+            {"section": "GPU Stress", "title": "GPU VRAM",     "badge": "VRAM", "accent": "#ea580c",     "cmd": "gpu_vram",     "desc": "4GB VRAM allocation + R/W"},
+            {"section": "GPU Stress", "title": "GPU Combined", "badge": "ALL",  "accent": ACCENT_STRESS, "cmd": "gpu_combined", "desc": "Compute + VRAM simultaneously"},
+        ]
+
+        _build_menu("cpu", CPU_TESTS)
+        _build_menu("gpu", GPU_TESTS)
+        _show_tab("cpu")
+
+        stress_status = status_label
         stress_win_alive = [True]
-
-        if app_mode == "both":
-            def on_stress_win_close():
-                stress_win_alive[0] = False
-                stress_win.destroy()
-
-            stress_win.protocol("WM_DELETE_WINDOW", on_stress_win_close)
 
         def process_log_queue():
             if not stress_win_alive[0]:
                 return
             for card_id, msg in stress_manager.drain_logs(max_items=20):
-                lb = stress_log_boxes.get(card_id)
-                if lb:
-                    lb.config(state="normal")
-                    lb.insert("end", f"{msg}\n")
-                    lb.see("end")
-                    lb.config(state="disabled")
+                tab_name = stress_log_boxes.get(card_id)
+                if tab_name in ("cpu", "gpu"):
+                    _write_log(tab_name, msg)
             root.after(250, process_log_queue)
 
         def update_stress_temps():
@@ -1806,11 +1962,9 @@ def main():
                     stress_status.config(text="Offline - LHMBridge not running", fg="#ff4444")
                 graph_cpu_temps.append(cpu_t)
                 graph_gpu_temps.append(gpu_t)
-                draw_graph_on(g_canvas2, 130)
             except tk.TclError:
                 stress_win_alive[0] = False
                 return
-
             root.after(1000, update_stress_temps)
 
         update_stress_temps()

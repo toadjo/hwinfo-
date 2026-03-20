@@ -50,9 +50,8 @@ for /r "%~dp0" %%F in (*.pyo) do @if exist "%%F" del /f /q "%%F" >nul 2>&1
 :: Kill any running instance
 taskkill /f /im HWInfoMonitor.exe >nul 2>&1
 taskkill /f /im LHMBridge.exe >nul 2>&1
+if exist core\stress_native.dll del /f /q core\stress_native.dll >nul 2>&1
 echo Done.
-
-:: ── Install dependencies ──────────────────────────────────────────────────────
 echo [1/5] Installing Python dependencies...
 %PYTHON% -m pip install -r requirements-build.txt --quiet
 echo Done.
@@ -71,6 +70,21 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 echo Done.
+
+:: ── Compile stress_native.dll ────────────────────────────────────────────────
+echo [2.5/5] Compiling stress_native.dll...
+where gcc >nul 2>&1
+if %errorlevel%==0 (
+    gcc -O3 -march=native -ffast-math -shared -o core\stress_native.dll core\stress_native.c -lm
+    if errorlevel 1 (
+        echo WARNING: stress_native.dll compile failed - stress tests will use numpy fallback
+    ) else (
+        echo Done.
+    )
+) else (
+    echo WARNING: gcc not found - skipping stress_native.dll
+    echo         Install MSYS2 + mingw-w64-x86_64-gcc for native stress tests
+)
 
 :: ── Build EXE ────────────────────────────────────────────────────────────────
 echo [3/5] Building EXE with PyInstaller...

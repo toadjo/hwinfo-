@@ -4,6 +4,28 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.5.3 Beta] - 2026-03-20
+
+### Added
+- **Stress Test UI redesign** — replaced crowded card grid with a clean 2-tab system (CPU Tests / GPU Tests); clicking a test card launches it immediately and switches to an active view with a live log and Stop button
+- **Native GIL-free stress engine** — new `stress_native.c` compiled at build time via gcc (`-O3 -march=native -ffast-math`); each thread runs a tight FMA loop in C with no Python GIL contention, achieving true 100% per-core utilization
+- **Three new CPU stress tests**: FMA Burn (tight FMA loop, max heat, L1/L2), Cache Bust (64MB buffer, busts L3, max power draw), Memory Flood (256MB buffer per thread, stresses IMC + DRAM)
+- **Split view mode** (`Sensors + Stress Test`) — both panels now open side-by-side in a single window with a draggable divider instead of two separate windows
+- `stress_native.dll` bundled inside installer — end users require no compiler or additional tools
+
+### Fixed
+- `graph_gpu_temps` NameError on startup in Stress Test mode
+- `bind_all` MouseWheel on stress canvas hijacking scroll in Sensors window — replaced with scoped bindings
+- Info window no longer opens automatically in `Sensors + Stress Test` mode
+- Unicode encode error (`✓`/`✗`/em-dash) in stress worker log on Windows cp1252 terminals
+
+### Changed
+- Stress test names updated to accurately reflect workload: Small FFT → FMA Burn, Large FFT → Cache Bust, Blend → Memory Flood
+- `build_all.bat` and `dev.bat` updated to auto-compile `stress_native.dll` via gcc if available
+- `hwinfo_monitor.spec` updated to bundle `stress_native.dll` and `stress_native.c`
+
+---
+
 ## [v0.5.2 Beta] - 2026-03-19
 
 ### Fixed

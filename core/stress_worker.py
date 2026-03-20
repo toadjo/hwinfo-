@@ -47,24 +47,8 @@ def _compile_native():
     import os, subprocess
 
     here     = os.path.dirname(os.path.abspath(__file__))
-    # In frozen PyInstaller exe, also check _MEIPASS/core/
-    candidates = [here]
-    if getattr(sys, 'frozen', False):
-        candidates += [
-            os.path.join(sys._MEIPASS, 'core'),
-            sys._MEIPASS,
-        ]
-    dll_path = None
-    src      = None
-    for d in candidates:
-        if os.path.exists(os.path.join(d, 'stress_native.dll')):
-            dll_path = os.path.join(d, 'stress_native.dll')
-        if os.path.exists(os.path.join(d, 'stress_native.c')):
-            src = os.path.join(d, 'stress_native.c')
-    if dll_path is None:
-        dll_path = os.path.join(here, 'stress_native.dll')  # default write location
-    if src is None:
-        src = os.path.join(here, 'stress_native.c')
+    dll_path = os.path.join(here, "stress_native.dll")
+    src      = os.path.join(here, "stress_native.c")
 
     # ── Step 1: try to load pre-built DLL (bundled with app) ──────────────
     if os.path.exists(dll_path):

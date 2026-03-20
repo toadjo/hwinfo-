@@ -1,15 +1,23 @@
 # hwinfo_monitor.spec
+import os
+
+_stress_dll = os.path.join('core', 'stress_native.dll')
+_stress_c   = os.path.join('core', 'stress_native.c')
+
+_extra_binaries = [(_stress_dll, 'core')] if os.path.exists(_stress_dll) else []
+_extra_datas    = [(_stress_c,   'core')] if os.path.exists(_stress_c)   else []
+
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=[
         ('dist\\LHMBridge', 'LHMBridge'),
         ('stress_worker.py', '.'),
         ('core', 'core'),
-    ],
+    ] + _extra_datas,
     hiddenimports=[
         'wmi', 'psutil', 'tkinter', 'tkinter.font',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFilter',
