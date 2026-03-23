@@ -38,27 +38,30 @@ pause & exit /b 1
 :found_python
 echo [Dev] Using Python: %PYTHON%
 
-set NEED_BRIDGE_BUILD=
-if not exist dist\LHMBridge\LHMBridge.exe set NEED_BRIDGE_BUILD=1
-if not exist dist\LHMBridge\RAMSPDToolkit-NDD.dll set NEED_BRIDGE_BUILD=1
-if not exist dist\LHMBridge\DiskInfoToolkit.dll set NEED_BRIDGE_BUILD=1
-if not exist dist\LHMBridge\HidSharp.dll set NEED_BRIDGE_BUILD=1
-if not exist dist\LHMBridge\BlackSharp.Core.dll set NEED_BRIDGE_BUILD=1
-
-if defined NEED_BRIDGE_BUILD (
-    echo [Dev] LHMBridge build missing - publishing bridge...
-    where dotnet >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo ERROR: .NET SDK not found. Download from https://aka.ms/dotnet/download
-        pause & exit /b 1
-    )
-    if not exist dist\LHMBridge mkdir dist\LHMBridge
-    dotnet publish "%~dp0LHMBridge\LHMBridge.csproj" -c Release -r win-x64 --self-contained true -o "%~dp0dist\LHMBridge" --nologo -v quiet
-    if errorlevel 1 (
-        echo ERROR: LHMBridge build failed
-        pause & exit /b 1
-    )
+:: ── Always rebuild LHMBridge ─────────────────────────────────────────────────
+echo [Dev] Rebuilding LHMBridge...
+where dotnet >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ERROR: .NET SDK not found. Download from https://aka.ms/dotnet/download
+    pause & exit /b 1
 )
+if not exist dist\LHMBridge mkdir dist\LHMBridge
+dotnet publish "%~dp0LHMBridge\LHMBridge.csproj" -c Release -r win-x64 --self-contained true -o "%~dp0dist\LHMBridge" --nologo -v quiet
+if errorlevel 1 (
+    echo ERROR: LHMBridge build failed
+    pause & exit /b 1
+)
+echo [Dev] LHMBridge built.
+
+:: ── Install dependencies if missing ─────────────────────────────────────────
+%PYTHON% -c "import PIL, numpy, psutil, wmi, threadpoolctl" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [Dev] Installing dependencies...
+    %PYTHON% -m pip install -r "%~dp0requirements.txt" --quiet
+)
+
+:: ── Clear pycache ─────────────────────────────────────────────────────────────
+for /d /r "%~dp0" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D" >nul 2>&1
 
 :: Kill any existing LHMBridge
 taskkill /f /im LHMBridge.exe >nul 2>&1

@@ -4,6 +4,28 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.5.4 Beta] - 2026-03-23
+
+### Changed
+- **Stress engine rewritten — C# backend via LHMBridge** — replaced Python thread/multiprocessing burn engine with a native C# `StressBurner` class embedded in LHMBridge; each test mode runs real OS threads with no GIL, achieving true 100% per-core utilization on all machines without requiring a compiler or any extra tools
+- **Three distinct stress modes now run genuinely different workloads**:
+  - FMA Burn — 8 independent FP64 chains per thread, stays in L1/L2, maximises heat
+  - Cache Bust — 64MB stride-access buffer per thread, forces constant L3 misses
+  - Memory Flood — 128MB sequential read+write per thread, stresses IMC and DRAM bandwidth
+- `stress_worker.py` simplified to a thin HTTP client calling `/stress/start` and `/stress/stop` on LHMBridge — no numpy, no multiprocessing, no GIL issues
+- Stress log output cleaned up — now shows `12 cores | 4.2B iters/s | Pass N | OK` instead of raw JSON
+- `dev.bat` updated to always rebuild LHMBridge on every run (previously skipped if DLLs existed), auto-installs Python dependencies, and clears `__pycache__` on startup
+- `build_all.bat` cleaned up — removed gcc `stress_native.dll` compile step (no longer needed)
+
+### Fixed
+- `stress_native.dll` dependency removed entirely — stress tests now work on any machine without gcc, cl.exe, or MSYS2
+- Old `stress_worker.py` being loaded from `core\` or `dist\_internal\` instead of root — duplicate files removed, path resolution clarified
+- p95 stress modes (`p95_small`, `p95_large`, `p95_blend`) not routing logs to correct UI card — fixed prefix map in `stress_manager.py`
+- Duplicate `_p95_small_thread` definition (first broken version silently overwriting second) — removed
+- Watchdog closure in `_native_burn_thread` capturing `stop_flag` by late binding — fixed with default argument
+
+---
+
 ## [v0.5.3 Beta] - 2026-03-20
 
 ### Added

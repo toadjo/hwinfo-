@@ -18,12 +18,23 @@ class StressManager:
         self._cached_python = None
 
     def _get_worker_path(self):
-        for p in [
-            os.path.join(os.path.dirname(sys.executable), "stress_worker.py"),
-            os.path.join(os.path.dirname(sys.executable), "_internal", "stress_worker.py"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "stress_worker.py"),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stress_worker.py"),
-        ]:
+        candidates = []
+
+        # When frozen by PyInstaller, _MEIPASS is the unpacked bundle directory
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(os.path.join(meipass, "stress_worker.py"))
+
+        # Alongside the exe (COLLECT layout: dist/HWInfoMonitor/stress_worker.py)
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, "stress_worker.py"))
+        candidates.append(os.path.join(exe_dir, "_internal", "stress_worker.py"))
+
+        # Source layout fallbacks
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "stress_worker.py"))
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stress_worker.py"))
+
+        for p in candidates:
             if os.path.exists(p):
                 return p
         return None
@@ -115,6 +126,9 @@ class StressManager:
         worker = self._get_worker_path()
         python = self._find_python()
         if not worker or not python:
+            default = next(iter(self._log_routing.values()), None)
+            if default:
+                self.log_queue.put((default, f"[ERR] stress_worker not found. worker={worker} python={python}"))
             return False
 
         si, creationflags = self._windows_startup_info()
@@ -193,13 +207,16 @@ class StressManager:
 
     def make_stress_action(self, cmd_prefix, card_id):
         prefix_map = {
-            "cpu_single": "cpu single",
-            "cpu_multi": "cpu multi",
-            "cpu_memory": "cpu memory",
-            "cpu_hybrid": "cpu hybrid",
-            "gpu_core": "gpu core",
-            "gpu_vram": "gpu vram",
+            "cpu_single":   "cpu single",
+            "cpu_multi":    "cpu multi",
+            "cpu_memory":   "cpu memory",
+            "cpu_hybrid":   "cpu hybrid",
+            "gpu_core":     "gpu core",
+            "gpu_vram":     "gpu vram",
             "gpu_combined": "gpu combined",
+            "p95_small":    "fma burn",
+            "p95_large":    "cache bust",
+            "p95_blend":    "memory flood",
         }
         route_key = prefix_map.get(cmd_prefix, cmd_prefix.replace("_", " "))
         self._log_routing[route_key] = card_id

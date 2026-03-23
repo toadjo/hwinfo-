@@ -196,6 +196,13 @@ class LHMBridge
                     buf = Encoding.UTF8.GetBytes(ready ? "true" : "false");
                     res.ContentType = "text/plain";
                 }
+                else if (path.StartsWith("/stress/"))
+                {
+                    string action = path[8..];
+                    string result = StressBurner.HandleCommand(action);
+                    buf = Encoding.UTF8.GetBytes(result);
+                    res.ContentType = "application/json";
+                }
                 else if (path == "/timing-debug")
                 {
                     var sb2 = new System.Text.StringBuilder();
@@ -444,6 +451,162 @@ static class AmdMemoryTimings
         Ring0.WritePciConfig(PCI_ADDR, SMN_INDEX, addr);
         Ring0.ReadPciConfig(PCI_ADDR, SMN_DATA, out uint data);
         return data;
+    }
+}
+
+// ── CPU Stress Burner ─────────────────────────────────────────────────────────
+static class StressBurner
+{
+    static CancellationTokenSource? _cts;
+    static readonly object _lock = new();
+    static string _mode = "idle";
+    static int _threadCount = 0;
+    static long _totalIters = 0;   // shared iteration counter for scoring
+
+    public static string HandleCommand(string action)
+    {
+        if (action.StartsWith("start"))
+        {
+            string mode = "fma";
+            var qi = action.IndexOf('?');
+            if (qi >= 0)
+                foreach (var part in action[(qi+1)..].Split('&'))
+                {
+                    var kv = part.Split('=');
+                    if (kv.Length == 2 && kv[0] == "mode") mode = kv[1];
+                }
+            Start(mode);
+            return $"{{\"status\":\"started\",\"mode\":\"{_mode}\",\"threads\":{_threadCount}}}";
+        }
+        else if (action == "stop")
+        {
+            Stop();
+            return "{\"status\":\"stopped\"}";
+        }
+        else if (action == "status")
+        {
+            long iters = Interlocked.Read(ref _totalIters);
+            return $"{{\"mode\":\"{_mode}\",\"threads\":{_threadCount},\"iters\":{iters}}}";
+        }
+        return "{\"error\":\"unknown command\"}";
+    }
+
+    static void Start(string mode)
+    {
+        lock (_lock)
+        {
+            Stop();
+            _cts  = new CancellationTokenSource();
+            _mode = mode;
+            Interlocked.Exchange(ref _totalIters, 0);
+
+            int cores = Environment.ProcessorCount;
+            _threadCount = mode == "single" ? 1 : cores;
+
+            var token = _cts.Token;
+            for (int i = 0; i < _threadCount; i++)
+            {
+                int idx = i;
+                new Thread(() => BurnLoop(mode, idx, token))
+                {
+                    IsBackground = true,
+                    Priority = ThreadPriority.BelowNormal,
+                }.Start();
+            }
+            Console.WriteLine($"[Stress] {mode} started — {_threadCount} threads");
+        }
+    }
+
+    static void Stop()
+    {
+        lock (_lock)
+        {
+            _cts?.Cancel(); _cts?.Dispose(); _cts = null;
+            _mode = "idle"; _threadCount = 0;
+            Console.WriteLine("[Stress] Stopped.");
+        }
+    }
+
+    static void BurnLoop(string mode, int idx, CancellationToken token)
+    {
+        switch (mode)
+        {
+            // ── FMA Burn: 8 independent FP chains — max IPC, fits L1/L2 ─────
+            case "fma":
+            case "single":
+            {
+                double a=1.1,b=1.2,c=1.3,d=1.4,e=1.5,f=1.6,g=1.7,h=1.8+idx*0.001;
+                long local = 0;
+                while (!token.IsCancellationRequested)
+                {
+                    for (int i = 0; i < 100000; i++)
+                    {
+                        a=a*1.0000001+0.0000001; b=b*1.0000002+0.0000002;
+                        c=c*1.0000003+0.0000003; d=d*1.0000004+0.0000004;
+                        e=e*0.9999999+0.0000001; f=f*0.9999998+0.0000002;
+                        g=g*0.9999997+0.0000003; h=h*0.9999996+0.0000004;
+                        if (a>1e100||a<1e-100) { a=1.1; b=1.2; c=1.3; d=1.4; }
+                        if (e>1e100||e<1e-100) { e=1.5; f=1.6; g=1.7; h=1.8; }
+                    }
+                    local += 100000;
+                    Interlocked.Add(ref _totalIters, 100000);
+                }
+                break;
+            }
+
+            // ── Cache Bust: stride access through large buffer — busts L3 ────
+            case "cache":
+            {
+                int size = 8 * 1024 * 1024; // 64MB per thread
+                var buf = new double[size];
+                for (int i = 0; i < size; i++) buf[i] = i * 0.000001 + 1.0;
+                int pos = idx * 127;
+                double acc = 1.0;
+                long local = 0;
+                while (!token.IsCancellationRequested)
+                {
+                    for (int i = 0; i < 100000; i++)
+                    {
+                        acc = acc * 1.0000001 + buf[pos];
+                        buf[pos] = acc;
+                        pos = (pos + 127) % size; // stride busts cache
+                        // FMA burst
+                        double x = acc;
+                        x=x*1.1+0.1; x=x*1.1+0.1; x=x*1.1+0.1; x=x*1.1+0.1;
+                        x=x*0.9-0.1; x=x*0.9-0.1; x=x*0.9-0.1; x=x*0.9-0.1;
+                        acc += x * 1e-30;
+                        if (acc > 1e100 || acc < -1e100) { acc = 1.0; }
+                    }
+                    local += 100000;
+                    Interlocked.Add(ref _totalIters, 100000);
+                }
+                break;
+            }
+
+            // ── Memory Flood: sequential read+write — stresses IMC/DRAM ──────
+            case "memory":
+            case "vram":
+            {
+                int size = 16 * 1024 * 1024; // 128MB per thread
+                double[] A, B;
+                try { A = new double[size]; B = new double[size]; }
+                catch (OutOfMemoryException)
+                { size = 4*1024*1024; A = new double[size]; B = new double[size]; }
+                for (int i = 0; i < size; i++) { A[i] = 1.0; B[i] = 1.0000001+idx*0.000001; }
+                long local = 0;
+                while (!token.IsCancellationRequested)
+                {
+                    for (int i = 0; i < size; i++) A[i] = A[i] + B[i];
+                    local += size;
+                    Interlocked.Add(ref _totalIters, size);
+                }
+                break;
+            }
+
+            // ── Default fallback ──────────────────────────────────────────────
+            default:
+                goto case "fma";
+        }
     }
 }
 
