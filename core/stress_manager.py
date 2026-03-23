@@ -1,235 +1,116 @@
-import os
 import queue
-import subprocess
-import sys
 import threading
 import time
+import urllib.request
+import json
 
-
-SUPPORTED_PYTHON_VERSIONS = ("3.14", "3.13", "3.12", "3.11", "3.10")
+from .constants import BRIDGE_PORT
 
 
 class StressManager:
-    def __init__(self, log_queue):
+    """Delegates all stress work to LHMBridge C# engine via HTTP."""
+
+    def __init__(self, log_queue, port=BRIDGE_PORT):
         self.log_queue = log_queue
-        self._stress_proc = None
-        self._stress_reader = None
+        self.port = port
+        self._base = f"http://127.0.0.1:{port}"
         self._log_routing = {}
-        self._cached_python = None
+        self._stop_events  = {}
+        self._poll_threads = {}
 
-    def _get_worker_path(self):
-        candidates = []
+    # cmd key → LHMBridge mode string
+    _BRIDGE_MODE = {
+        "cpu_single": "cpu_single",
+        "cpu_multi":  "cpu_multi",
+        "memory":     "memory",
+        "combined":   "combined",
+        "gpu_core":     "fma",
+        "gpu_vram":     "vram",
+        "gpu_combined": "combined",
+    }
 
-        # When frozen by PyInstaller, _MEIPASS is the unpacked bundle directory
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(os.path.join(meipass, "stress_worker.py"))
-
-        # Alongside the exe (COLLECT layout: dist/HWInfoMonitor/stress_worker.py)
-        exe_dir = os.path.dirname(sys.executable)
-        candidates.append(os.path.join(exe_dir, "stress_worker.py"))
-        candidates.append(os.path.join(exe_dir, "_internal", "stress_worker.py"))
-
-        # Source layout fallbacks
-        candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "stress_worker.py"))
-        candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stress_worker.py"))
-
-        for p in candidates:
-            if os.path.exists(p):
-                return p
-        return None
-
-    def _find_python(self):
-        if self._cached_python:
-            return self._cached_python
-
-        if not getattr(sys, "frozen", False):
-            self._cached_python = sys.executable
-            return self._cached_python
-
-        candidates = []
-
-        def add_candidate(path):
-            if path and os.path.exists(path) and path not in candidates:
-                candidates.append(path)
-
+    def _get(self, path, timeout=3):
         try:
-            import winreg
+            with urllib.request.urlopen(f"{self._base}{path}", timeout=timeout) as r:
+                return r.read().decode()
+        except Exception as e:
+            return f'{{"error":"{e}"}}'
 
-            for hive in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
-                for ver in SUPPORTED_PYTHON_VERSIONS:
-                    try:
-                        key = winreg.OpenKey(
-                            hive, rf"SOFTWARE\Python\PythonCore\{ver}\InstallPath"
-                        )
-                        path = winreg.QueryValue(key, None)
-                        exe = os.path.join(path.strip(), "python.exe")
-                        add_candidate(exe)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    def _bridge_start(self, mode):
+        raw = self._get(f"/stress/start?mode={mode}")
+        try:    return json.loads(raw)
+        except: return {}
 
-        for p in [
-            r"C:\Program Files\Python314\python.exe",
-            r"C:\Program Files\Python313\python.exe",
-            r"C:\Program Files\Python312\python.exe",
-            r"C:\Program Files\Python311\python.exe",
-            r"C:\Program Files\Python310\python.exe",
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python314\python.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python313\python.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python312\python.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python311\python.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python310\python.exe"),
-        ]:
-            add_candidate(p)
+    def _bridge_stop(self):
+        self._get("/stress/stop")
 
-        try:
-            res = subprocess.run(["where", "python"], capture_output=True, text=True, timeout=3)
-            for line in res.stdout.strip().splitlines():
-                line = line.strip()
-                if line.endswith("python.exe") and os.path.exists(line):
-                    add_candidate(line)
-        except Exception:
-            pass
+    def _bridge_status(self):
+        raw = self._get("/stress/status")
+        try:    return json.loads(raw)
+        except: return {}
 
-        for exe in candidates:
-            try:
-                res = subprocess.run(
-                    [exe, "-c", "import numpy; print('ok')"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if "ok" in res.stdout:
-                    self._cached_python = exe
-                    return exe
-            except Exception:
-                pass
+    def _poll_loop(self, cmd_prefix, stop_ev, log_cb):
+        passes = 0
+        last_iters = 0
+        last_time  = time.perf_counter()
 
-        self._cached_python = candidates[0] if candidates else None
-        return self._cached_python
+        while not stop_ev.is_set():
+            stop_ev.wait(2.0)
+            if stop_ev.is_set():
+                break
 
-    def _windows_startup_info(self):
-        if not hasattr(subprocess, "STARTUPINFO"):
-            return None, 0
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = subprocess.SW_HIDE
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        return si, creationflags
+            passes += 1
+            d = self._bridge_status()
+            threads = d.get("threads", 0)
+            iters   = d.get("iters",   0)
 
-    def _ensure_stress_proc(self):
-        if self._stress_proc and self._stress_proc.poll() is None:
-            return True
+            now     = time.perf_counter()
+            delta_i = iters - last_iters
+            delta_t = now - last_time
+            rate    = delta_i / delta_t / 1e9 if delta_t > 0 else 0.0
+            last_iters = iters
+            last_time  = now
 
-        worker = self._get_worker_path()
-        python = self._find_python()
-        if not worker or not python:
-            default = next(iter(self._log_routing.values()), None)
-            if default:
-                self.log_queue.put((default, f"[ERR] stress_worker not found. worker={worker} python={python}"))
-            return False
+            if "error" in d:
+                log_cb(f"Bridge error: {d['error']}")
+            else:
+                log_cb(f"{threads} cores | {rate:.2f}B iters/s | Pass {passes} | OK")
 
-        si, creationflags = self._windows_startup_info()
-        self._stress_proc = subprocess.Popen(
-            [python, worker],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            startupinfo=si,
-            creationflags=creationflags,
-            text=True,
-            bufsize=1,
-        )
-
-        def reader():
-            while True:
-                try:
-                    if not self._stress_proc or self._stress_proc.poll() is not None:
-                        break
-                    line = self._stress_proc.stdout.readline()
-                    if not line:
-                        time.sleep(0.05)
-                        continue
-                    line = line.strip()
-                    if not line:
-                        continue
-                    routed = False
-                    line_lower = line.lower()
-                    for prefix, card_id in list(self._log_routing.items()):
-                        if line_lower.startswith(prefix.lower()):
-                            self.log_queue.put((card_id, line))
-                            routed = True
-                            break
-                    if not routed:
-                        for prefix, card_id in list(self._log_routing.items()):
-                            if prefix.lower() in line_lower:
-                                self.log_queue.put((card_id, line))
-                                routed = True
-                                break
-                    if not routed:
-                        default = next(iter(self._log_routing.values()), None)
-                        if default:
-                            self.log_queue.put((default, line))
-                except Exception:
-                    time.sleep(0.05)
-
-        def stderr_reader():
-            while True:
-                try:
-                    if not self._stress_proc or self._stress_proc.poll() is not None:
-                        break
-                    line = self._stress_proc.stderr.readline()
-                    if not line:
-                        time.sleep(0.05)
-                        continue
-                    line = line.strip()
-                    if line:
-                        default = next(iter(self._log_routing.values()), None)
-                        if default:
-                            self.log_queue.put((default, f"[ERR] {line}"))
-                except Exception:
-                    time.sleep(0.05)
-
-        self._stress_reader = threading.Thread(target=reader, daemon=True)
-        self._stress_reader.start()
-        threading.Thread(target=stderr_reader, daemon=True).start()
-        return True
-
-    def _send_cmd(self, cmd):
-        if self._stress_proc and self._stress_proc.poll() is None:
-            try:
-                self._stress_proc.stdin.write(cmd + "\n")
-                self._stress_proc.stdin.flush()
-            except Exception:
-                pass
+        self._bridge_stop()
+        log_cb("■ Stopped.")
 
     def make_stress_action(self, cmd_prefix, card_id):
-        prefix_map = {
-            "cpu_single":   "cpu single",
-            "cpu_multi":    "cpu multi",
-            "cpu_memory":   "cpu memory",
-            "cpu_hybrid":   "cpu hybrid",
-            "gpu_core":     "gpu core",
-            "gpu_vram":     "gpu vram",
-            "gpu_combined": "gpu combined",
-            "p95_small":    "fma burn",
-            "p95_large":    "cache bust",
-            "p95_blend":    "memory flood",
-        }
-        route_key = prefix_map.get(cmd_prefix, cmd_prefix.replace("_", " "))
-        self._log_routing[route_key] = card_id
+        self._log_routing[cmd_prefix] = card_id
 
         def start(log_cb):
-            if not self._ensure_stress_proc():
-                log_cb("Error: stress_worker.py or Python not found!")
+            existing = self._stop_events.get(cmd_prefix)
+            if existing and not existing.is_set():
+                existing.set()
+
+            mode = self._BRIDGE_MODE.get(cmd_prefix, "cpu_multi")
+            resp = self._bridge_start(mode)
+
+            if "error" in resp:
+                log_cb(f"[ERR] Bridge not available: {resp['error']}")
                 return
-            self._send_cmd(f"{cmd_prefix}_start")
-            log_cb("▶ Starting...")
+
+            threads = resp.get("threads", "?")
+            log_cb(f"▶ Started {threads} threads | mode={mode}")
+
+            stop_ev = threading.Event()
+            self._stop_events[cmd_prefix] = stop_ev
+            t = threading.Thread(
+                target=self._poll_loop,
+                args=(cmd_prefix, stop_ev, log_cb),
+                daemon=True,
+            )
+            self._poll_threads[cmd_prefix] = t
+            t.start()
 
         def stop(log_cb):
-            self._send_cmd(f"{cmd_prefix}_stop")
+            ev = self._stop_events.get(cmd_prefix)
+            if ev:
+                ev.set()
             log_cb("■ Stop sent...")
 
         return start, stop

@@ -234,12 +234,40 @@ def main():
 
     current_theme_name = [_load_theme_name()]
 
+    # ── Window size registry ──────────────────────────────────────────────────
+    _WIN_SIZE_KEY = r"Software\HWInfoMonitor"
+
+    def _load_window_size(mode):
+        """Load saved WxH for a given mode (sensors/stress/both). Returns None if not set."""
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WIN_SIZE_KEY)
+            val, _ = winreg.QueryValueEx(key, f"WindowSize_{mode}")
+            winreg.CloseKey(key)
+            # Validate format "WxH"
+            parts = val.lower().split("x")
+            if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+                return val
+        except Exception:
+            pass
+        return None
+
+    def _save_window_size(mode, size_str):
+        """Save WxH string for a given mode."""
+        try:
+            import winreg
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _WIN_SIZE_KEY)
+            winreg.SetValueEx(key, f"WindowSize_{mode}", 0, winreg.REG_SZ, size_str)
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
     def open_settings(parent_win):
         sw = tk.Toplevel(parent_win)
         sw.title("Settings")
         sw.configure(bg=BG)
         sw.resizable(False, False)
-        sw.geometry("460x320")
+        sw.geometry("460x420")
         sw.grab_set()
 
         tk.Label(sw, text="Settings", fg="white", bg=BG,
@@ -267,6 +295,91 @@ def main():
                                    values=list(THEMES.keys()),
                                    width=24, state="readonly")
         theme_combo.pack(side="left", padx=(10, 0))
+
+        # ── Window Size selector ──────────────────────────────────────────────
+        # Detect which mode this window belongs to so we load/save the right key
+        _title = parent_win.title().lower()
+        if "stress" in _title and "sensors" not in _title:
+            _current_mode = "stress"
+        elif "both" in _title or ("sensors" in _title and "stress" in _title):
+            _current_mode = "both"
+        else:
+            _current_mode = "sensors"
+
+        _PRESET_SIZES = [
+            "Default",
+            "1280x720",
+            "1280x800",
+            "1366x768",
+            "1440x900",
+            "1600x900",
+            "1920x1080",
+            "2560x1080",
+            "2560x1440",
+            "3840x2160",
+            "Custom",
+        ]
+
+        saved_size = _load_window_size(_current_mode)
+        # Determine initial combo value
+        if saved_size and saved_size in _PRESET_SIZES:
+            _initial_preset = saved_size
+        elif saved_size:
+            _initial_preset = "Custom"
+        else:
+            _initial_preset = "Default"
+
+        wf = tk.Frame(sw, bg=BG)
+        wf.pack(fill="x", padx=24, pady=(6, 4))
+        tk.Label(wf, text="Window Size:", fg="#6b7280", bg=BG,
+                 font=("Segoe UI", 10)).pack(side="left")
+        size_preset_var = tk.StringVar(value=_initial_preset)
+        size_combo = ttk.Combobox(wf, textvariable=size_preset_var,
+                                  values=_PRESET_SIZES, width=16, state="readonly")
+        size_combo.pack(side="left", padx=(10, 0))
+
+        # Custom W × H inputs (only visible when "Custom" selected)
+        custom_frame = tk.Frame(sw, bg=BG)
+
+        _cw_default, _ch_default = "", ""
+        if saved_size and _initial_preset == "Custom":
+            _parts = saved_size.lower().split("x")
+            if len(_parts) == 2:
+                _cw_default, _ch_default = _parts[0].strip(), _parts[1].strip()
+
+        custom_w_var = tk.StringVar(value=_cw_default)
+        custom_h_var = tk.StringVar(value=_ch_default)
+
+        def _only_digits(val):
+            return val == "" or val.isdigit()
+
+        vcmd = sw.register(_only_digits)
+
+        tk.Label(custom_frame, text="W:", fg="#6b7280", bg=BG,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(32, 2))
+        tk.Entry(custom_frame, textvariable=custom_w_var, width=6,
+                 bg="#1e2a3a", fg="white", insertbackground="white",
+                 relief="flat", font=("Segoe UI", 10),
+                 validate="key", validatecommand=(vcmd, "%P")).pack(side="left")
+        tk.Label(custom_frame, text="H:", fg="#6b7280", bg=BG,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(8, 2))
+        tk.Entry(custom_frame, textvariable=custom_h_var, width=6,
+                 bg="#1e2a3a", fg="white", insertbackground="white",
+                 relief="flat", font=("Segoe UI", 10),
+                 validate="key", validatecommand=(vcmd, "%P")).pack(side="left")
+        tk.Label(custom_frame, text="px", fg="#4a5568", bg=BG,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(4, 0))
+
+        def _on_preset_change(e=None):
+            if size_preset_var.get() == "Custom":
+                custom_frame.pack(fill="x", padx=0, pady=(2, 4))
+            else:
+                custom_frame.pack_forget()
+
+        size_combo.bind("<<ComboboxSelected>>", _on_preset_change)
+        # Show custom frame immediately if already on Custom
+        if _initial_preset == "Custom":
+            custom_frame.pack(fill="x", padx=0, pady=(2, 4))
 
         # ── Preview swatch ────────────────────────────────────────────────────
         swatch_frame = tk.Frame(sw, bg=BG)
@@ -304,6 +417,44 @@ def main():
             current_theme_name[0] = theme_var.get()
             _save_font(current_font[0])
             _save_theme_name(current_theme_name[0])
+
+            # ── Window size ───────────────────────────────────────────────────
+            preset = size_preset_var.get()
+            new_geom = None
+            if preset == "Default":
+                # Remove any saved size so next launch uses the built-in default
+                try:
+                    import winreg
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WIN_SIZE_KEY,
+                                        0, winreg.KEY_SET_VALUE)
+                    winreg.DeleteValue(key, f"WindowSize_{_current_mode}")
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
+            elif preset == "Custom":
+                cw = custom_w_var.get().strip()
+                ch = custom_h_var.get().strip()
+                if cw.isdigit() and ch.isdigit() and int(cw) >= 400 and int(ch) >= 300:
+                    size_str = f"{cw}x{ch}"
+                    _save_window_size(_current_mode, size_str)
+                    new_geom = size_str
+                else:
+                    # Invalid custom size — show error inline and abort
+                    preview_lbl.config(
+                        text="⚠ Custom size invalid (min 400×300)",
+                        fg="#ef4444", bg=BG, font=("Segoe UI", 9))
+                    return
+            else:
+                _save_window_size(_current_mode, preset)
+                new_geom = preset
+
+            # Apply geometry to live window immediately (no restart needed)
+            if new_geom:
+                try:
+                    parent_win.geometry(new_geom)
+                except Exception:
+                    pass
+
             sw.destroy()
             info = tk.Toplevel(parent_win)
             info.configure(bg=BG)
@@ -312,7 +463,7 @@ def main():
             info.geometry("320x110")
             tk.Label(info, text="Settings saved!", fg="white", bg=BG,
                      font=("Segoe UI", 12, "bold")).pack(pady=(24, 4))
-            tk.Label(info, text="Restart the app to apply changes.", fg="#6b7280", bg=BG,
+            tk.Label(info, text="Restart the app to apply all changes.", fg="#6b7280", bg=BG,
                      font=("Segoe UI", 9)).pack()
             tk.Button(info, text="OK", bg=ACCENT_CPU, fg="white",
                       font=("Segoe UI", 10, "bold"), relief="flat",
@@ -851,21 +1002,21 @@ def main():
 
     if app_mode == "sensors":
         root.title(f"HWInfo Monitor {APP_VERSION} - Sensors")
-        root.geometry("1100x740")
+        root.geometry(_load_window_size("sensors") or "1100x740")
         status_label = _build_header(root, "Sensors", COL_CPU)
         sensors_root = root
         stress_root = None
 
     elif app_mode == "stress":
         root.title(f"HWInfo Monitor {APP_VERSION} - Stress Test")
-        root.geometry("1100x740")
+        root.geometry(_load_window_size("stress") or "1100x740")
         status_label = _build_header(root, "Stress Test", "#ff6644")
         sensors_root = None
         stress_root = root
 
     else:  # both — single window, split left/right
         root.title(f"HWInfo Monitor {APP_VERSION} - Sensors + Stress Test")
-        root.geometry("2500x974")
+        root.geometry(_load_window_size("both") or "2500x974")
         root.geometry("+0+0")
         status_label = _build_header(root, "Sensors + Stress Test", COL_CPU)
 
@@ -992,6 +1143,7 @@ def main():
                 v = tk.Label(col, text="--", fg=accent, bg=bg,
                              font=("Segoe UI", 14, "bold"))
                 v.pack()
+                v._stat_col = col   # attach parent col for show/hide
                 labels.append(v)
             return labels
 
@@ -1089,7 +1241,7 @@ def main():
 
                     # ── Graph side (right) — hidden until temp exists ─────────
                     gc = tk.Frame(gpu_row_f, bg=BLOCK_BG)
-                    gc.pack(side="left", fill="both", expand=True, padx=(16, 0))
+                    # Don't pack yet — shown only when temp sensor appears
                     g_hdr    = tk.Frame(gc, bg=BLOCK_BG)
                     g_legend = tk.Frame(g_hdr, bg=BLOCK_BG)
                     g_canvas = tk.Canvas(gc, bg=GRAPH_BG, height=170,
@@ -1230,6 +1382,7 @@ def main():
                 v = tk.Label(f, text="\u2014", fg=val_color, bg=bg,
                              font=("Segoe UI", 10, "bold"), anchor="e")
                 v.pack(side="right", padx=(0, 16))
+                v._row_frame = f   # attach parent for hide/show
                 return v
     
             # Secondary GPU section
@@ -1326,6 +1479,18 @@ def main():
 
             status_label.config(text="Live", fg="#00ff88")
 
+            def _set(lbl, text, fg):
+                """Set label text/color, hiding the row/column if text is None."""
+                row = getattr(lbl, "_row_frame", None)
+                col = getattr(lbl, "_stat_col", None)
+                if text is None:
+                    if row and row.winfo_ismapped():   row.pack_forget()
+                    if col and col.winfo_ismapped():   col.pack_forget()
+                else:
+                    lbl.config(text=text, fg=fg)
+                    if row and not row.winfo_ismapped(): row.pack(fill="x", padx=8)
+                    if col and not col.winfo_ismapped(): col.pack(side="left", padx=18)
+
 
 
             cpu_temp = bridge.get_cpu_temp()
@@ -1378,12 +1543,8 @@ def main():
             else:
                 cpu_diag_lbl.config(text="")
             cpu_clock_lbl.config(text=fmt_clock(cpu_clock), fg=clock_color(cpu_clock))
-            cpu_power_lbl.config(
-                text=f"{cpu_power:.1f} W" if cpu_power is not None else "N/A",
-                fg="#f87171" if cpu_power is not None else "#4a5568")
-            cpu_voltage_lbl.config(
-                text=f"{cpu_voltage:.3f} V" if cpu_voltage is not None else "N/A",
-                fg="#22d3ee" if cpu_voltage is not None else "#4a5568")
+            _set(cpu_power_lbl,   f"{cpu_power:.1f} W"   if cpu_power   is not None else None, "#f87171")
+            _set(cpu_voltage_lbl, f"{cpu_voltage:.3f} V" if cpu_voltage is not None else None, "#22d3ee")
 
             ram = psutil.virtual_memory()
             ram_clocks = bridge.find_all_sensors("memory", "", "Clock")
@@ -1432,7 +1593,7 @@ def main():
 
             ram_used_lbl.config(text=f"{ram.used/1024**3:.1f} GB")
             ram_free_lbl.config(text=f"{ram.available/1024**3:.1f} GB")
-            ram_clock_lbl.config(text=f"{ram_clock} MHz" if ram_clock else "N/A")
+            _set(ram_clock_lbl, f"{ram_clock} MHz" if ram_clock else None, "#c4b5fd")
             update_bar(ram_bar, ram.percent)
             ram_type_lbl.config(text=ram_type_str)
             ram_form_lbl.config(text=form_only)
@@ -1503,33 +1664,33 @@ def main():
                     acc = lbls["acc"]
 
                     if lbls.get("primary", False):
-                        # Rings
+                        # Load ring — always shown
                         draw_ring(lbls["ring_load"], g_usage, "LOAD", acc, BLOCK_BG,
                                   max_val=100, unit="%")
-                        draw_ring(lbls["ring_temp"], g_temp, "TEMP", temp_color(g_temp), BLOCK_BG,
-                                  max_val=110, unit="°C")
+                        # Temp ring — hide canvas entirely if no temp sensor
+                        rt = lbls["ring_temp"]
+                        if g_temp is not None:
+                            if not rt.winfo_ismapped(): rt.pack(side="left", padx=24)
+                            draw_ring(rt, g_temp, "TEMP", temp_color(g_temp), BLOCK_BG,
+                                      max_val=110, unit="°C")
+                        else:
+                            if rt.winfo_ismapped(): rt.pack_forget()
                         # Stat strip labels in block
-                        lbls["clock"].config(
-                            text=fmt_clock(g_clock) if g_clock is not None else "N/A",
-                            fg=acc if g_clock is not None else "#4a5568")
-                        lbls["vram"].config(
-                            text=f"{g_vram:.0f} MB" if g_vram is not None else "N/A",
-                            fg="#fbbf24" if g_vram is not None else "#4a5568")
-                        lbls["power"].config(
-                            text=f"{g_power:.1f} W" if g_power is not None else "N/A",
-                            fg="#f87171" if g_power is not None else "#4a5568")
-                        lbls["hotspot"].config(
-                            text=f"{g_hotspot:.0f}°C" if g_hotspot is not None else "N/A",
-                            fg=temp_color(g_hotspot) if g_hotspot is not None else "#4a5568")
-                        lbls["vram_temp"].config(
-                            text=f"{g_vram_t:.0f}°C" if g_vram_t is not None else "N/A",
-                            fg=temp_color(g_vram_t) if g_vram_t is not None else "#4a5568")
-                        lbls["voltage"].config(
-                            text=f"{g_voltage:.3f} V" if g_voltage is not None else "N/A",
-                            fg="#22d3ee" if g_voltage is not None else "#4a5568")
+                        def _stat_update(lbl, value, fmt_fn, color):
+                            _set(lbl, fmt_fn(value) if value is not None else None, color)
+
+                        _stat_update(lbls["clock"],    g_clock,   fmt_clock,                    acc)
+                        _stat_update(lbls["vram"],     g_vram,    lambda v: f"{v:.0f} MB",      "#fbbf24")
+                        _stat_update(lbls["power"],    g_power,   lambda v: f"{v:.1f} W",       "#f87171")
+                        _stat_update(lbls["hotspot"],  g_hotspot, lambda v: f"{v:.0f}°C",       temp_color(g_hotspot) if g_hotspot is not None else "#f87171")
+                        _stat_update(lbls["vram_temp"],g_vram_t,  lambda v: f"{v:.0f}°C",       temp_color(g_vram_t) if g_vram_t is not None else "#fb923c")
+                        _stat_update(lbls["voltage"],  g_voltage, lambda v: f"{v:.3f} V",       "#22d3ee")
                         # Graph — only show when at least one temp exists
                         any_temp = any(v is not None for v in [g_temp, g_hotspot, g_vram_t])
+                        gc = lbls["graph_col"]
                         if any_temp:
+                            if not gc.winfo_ismapped():
+                                gc.pack(side="left", fill="both", expand=True, padx=(16, 0))
                             if not lbls["graph_visible"][0]:
                                 lbls["graph_visible"][0] = True
                                 hdr = lbls["graph_hdr"]
@@ -1557,6 +1718,8 @@ def main():
                                     tk.Label(lf, text=f"● {name}", fg=c, bg=BLOCK_BG,
                                              font=("Segoe UI", 7, "bold")).pack(side="left", padx=(0,8))
                             draw_multi_graph(lbls["graph_canvas"], series, 170)
+                        else:
+                            if gc.winfo_ismapped(): gc.pack_forget()
                     # Secondary GPU → right panel compact section
                     if not lbls.get("primary", False) and info_win is not None:
                         if not sec_gpu_visible[0] and gpu_secondary:
@@ -1587,8 +1750,8 @@ def main():
                             sec_load_lbl[0] = _srow("Load",      info["acc"])
                             sec_vram_lbl[0] = _srow("VRAM Used", "#fbbf24")
                         if sec_load_lbl[0]:
-                            sec_load_lbl[0].config(text=f"{g_usage:.0f}%" if g_usage is not None else "N/A")
-                            sec_vram_lbl[0].config(text=f"{g_vram:.0f} MB" if g_vram is not None else "N/A")
+                            _set(sec_load_lbl[0], f"{g_usage:.0f}%" if g_usage is not None else None, info["acc"])
+                            _set(sec_vram_lbl[0], f"{g_vram:.0f} MB" if g_vram is not None else None, "#fbbf24")
 
             if info_win is not None:
                 for w in fan_frame.winfo_children():
@@ -1639,17 +1802,17 @@ def main():
                         bridge.sensor_value_in(sensors, ["Power On Hours", "Power-On Hours", "Powered On Hours"], "SmallData")
                     )
     
-                    lbls["health"].config(text=f"{health:.0f}%" if health is not None else "N/A", fg=health_color(health))
-                    lbls["temp"].config(text=f"{temp:.0f}°C" if temp is not None else "N/A", fg=temp_color(temp))
-                    lbls["read"].config(text=fmt_data(read), fg="#6b7280")
-                    lbls["write"].config(text=fmt_data(write), fg="#6b7280")
+                    _set(lbls["health"], f"{health:.0f}%" if health is not None else None, health_color(health))
+                    _set(lbls["temp"],   f"{temp:.0f}°C"  if temp   is not None else None, temp_color(temp))
+                    _set(lbls["read"],   fmt_data(read)   if read   is not None else None, "#6b7280")
+                    _set(lbls["write"],  fmt_data(write)  if write  is not None else None, "#6b7280")
                     if poh is not None:
                         poh_days  = int(poh) // 24
                         poh_hours = int(poh) % 24
                         poh_str   = f"{poh_days}d {poh_hours}h" if poh_days > 0 else f"{poh_hours}h"
-                        lbls["poh"].config(text=poh_str, fg="#6b7280")
+                        _set(lbls["poh"], poh_str, "#6b7280")
                     else:
-                        lbls["poh"].config(text="N/A", fg="#4a5568")
+                        _set(lbls["poh"], None, "#4a5568")
     
                     # Rebuild partition bar rows
                     pf = lbls["parts_frame"]
@@ -1874,7 +2037,7 @@ def main():
             mc.bind("<MouseWheel>",  lambda e: mc.yview_scroll(int(-1*(e.delta/120)), "units"))
             mi.bind("<MouseWheel>",  lambda e: mc.yview_scroll(int(-1*(e.delta/120)), "units"))
 
-            COLS = 4
+            COLS = 1
             for c in range(COLS):
                 mi.columnconfigure(c, weight=1)
 
@@ -1924,9 +2087,14 @@ def main():
         _ncores = _mp.cpu_count()
 
         CPU_TESTS = [
-            {"section": "CPU Stress Tests", "title": "FMA Burn",     "badge": "FMA", "accent": "#7c3aed", "cmd": "p95_small", "desc": "Tight FMA loop, max heat (L1/L2)"},
-            {"section": "CPU Stress Tests", "title": "Cache Bust",   "badge": "L3", "accent": "#0891b2", "cmd": "p95_large", "desc": "Cache-busting loop, max power (L3+DRAM)"},
-            {"section": "CPU Stress Tests", "title": "Memory Flood", "badge": "RAM", "accent": "#d97706", "cmd": "p95_blend", "desc": "256MB RAM flood + FMA, stresses IMC"},
+            {"section": "CPU Stress Tests", "title": "CPU Single Core", "badge": "1T",   "accent": "#7c3aed", "cmd": "cpu_single",
+             "desc": f"1 thread · AVX2 FMA · max boost clock + single-core heat"},
+            {"section": "CPU Stress Tests", "title": "CPU Multi Core",  "badge": "AVX2", "accent": "#ef4444", "cmd": "cpu_multi",
+             "desc": f"All {_ncores} threads · AVX2 FMA · max all-core load + thermals"},
+            {"section": "CPU Stress Tests", "title": "Memory / IMC",    "badge": "RAM",  "accent": "#d97706", "cmd": "memory",
+             "desc": "256MB/thread · sequential + stride · saturates DDR5 IMC"},
+            {"section": "CPU Stress Tests", "title": "CPU + Memory",    "badge": "ALL",  "accent": "#06b6d4", "cmd": "combined",
+             "desc": f"All {_ncores} threads · FMA + memory flood · max package power"},
         ]
         GPU_TESTS = [
             {"section": "GPU Stress", "title": "GPU Core",     "badge": "FP32", "accent": ACCENT_GPU,    "cmd": "gpu_core",     "desc": "Float32 compute throughput"},

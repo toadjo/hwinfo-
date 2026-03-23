@@ -4,6 +4,28 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.5.5 Beta] - 2026-03-23
+
+### Changed
+- **Stress engine overhauled — pure C# native, no subprocess, no Python worker**
+  - `stress_manager.py` fully rewritten: no subprocess spawn, no stdin/stdout pipe, no Python stress worker — pure HTTP calls to LHMBridge `/stress/start`, `/stress/stop`, `/stress/status`
+  - `stress_worker.py` (both root and `core/`) removed — no longer needed
+  - `stress_native.dll` / `stress_native.c` removed — no longer needed
+- **Three new CPU stress tests replace previous p95 modes**:
+  - **CPU Single Core** (`cpu_single`) — 1 thread, 12 independent AVX2 FMA chains × 4 doubles (48 FMAs/iter), maximises single-core boost clock and single-core heat; `[MethodImpl(NoInlining)]` + `Sink()` prevent JIT dead-code elimination
+  - **CPU Multi Core** (`cpu_multi`) — same AVX2 FMA engine on all logical cores, equivalent to Prime95 Small FFT in thermal output
+  - **Memory / IMC** (`memory`) — 256MB per thread, 3-pass pattern: AVX2 sequential forward (256-bit stores), stride-127 (2M iterations, defeats prefetcher), AVX2 reverse sequential; forces real DRAM traffic above L3
+  - **CPU + Memory** (`combined`) — half threads run pure AVX2 FMA, half run pure memory flood simultaneously; both pressures hit the CPU at the same time for maximum package power
+- `ThreadPriority` raised from `BelowNormal` → `Highest` on all stress threads
+- Scalar fallback expanded from 8 → 16 independent chains for non-AVX2 CPUs
+- Window Size setting added to Settings dialog — preset resolutions (1280×720 → 4K) + Custom W×H input; persisted per launch mode in registry; applied immediately on save without restart
+
+### Fixed
+- Stress tests showing duplicate process (Python subprocess + C# bridge) — subprocess removed entirely
+- Settings dialog height too small after Window Size row addition — increased 320 → 420px
+
+---
+
 ## [v0.5.4 Beta] - 2026-03-23
 
 ### Changed

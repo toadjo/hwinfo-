@@ -6,6 +6,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -461,13 +464,19 @@ static class StressBurner
     static readonly object _lock = new();
     static string _mode = "idle";
     static int _threadCount = 0;
-    static long _totalIters = 0;   // shared iteration counter for scoring
+    static long _totalIters = 0;
+
+    // Modes:
+    //   cpu_single  — 1 thread, AVX2 FMA, max single-core boost + heat
+    //   cpu_multi   — all threads, AVX2 FMA, max all-core load + thermals
+    //   memory      — all threads, sequential + stride, max IMC/DRAM bandwidth
+    //   combined    — all threads, AVX2 FMA + memory interleaved, max package power
 
     public static string HandleCommand(string action)
     {
         if (action.StartsWith("start"))
         {
-            string mode = "fma";
+            string mode = "cpu_multi";
             var qi = action.IndexOf('?');
             if (qi >= 0)
                 foreach (var part in action[(qi+1)..].Split('&'))
@@ -496,12 +505,12 @@ static class StressBurner
         lock (_lock)
         {
             Stop();
-            _cts  = new CancellationTokenSource();
+            _cts = new CancellationTokenSource();
             _mode = mode;
             Interlocked.Exchange(ref _totalIters, 0);
 
             int cores = Environment.ProcessorCount;
-            _threadCount = mode == "single" ? 1 : cores;
+            _threadCount = mode == "cpu_single" ? 1 : cores;
 
             var token = _cts.Token;
             for (int i = 0; i < _threadCount; i++)
@@ -510,7 +519,7 @@ static class StressBurner
                 new Thread(() => BurnLoop(mode, idx, token))
                 {
                     IsBackground = true,
-                    Priority = ThreadPriority.BelowNormal,
+                    Priority = ThreadPriority.Highest,
                 }.Start();
             }
             Console.WriteLine($"[Stress] {mode} started — {_threadCount} threads");
@@ -527,85 +536,247 @@ static class StressBurner
         }
     }
 
+    // ── Sink — prevents JIT dead-code elimination of FMA results ─────────────
+    // NoInlining forces the JIT to treat this as a real use of the value,
+    // so it cannot eliminate the FMA chains above it.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void Sink(double v) { }
+
+    // ── AVX2 FMA burn — guaranteed max FP load ────────────────────────────────
+    // 12 independent Vector256<double> chains (48 doubles in flight)
+    // No branches inside hot loop — no resets, values stay bounded by design
+    // (mul=1.0000001 never diverges to inf in any reasonable run duration)
+    // Sink() call every outer iteration forces JIT to materialise all registers
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void AvxFmaBurn(CancellationToken token)
+    {
+        if (Fma.IsSupported && Avx.IsSupported)
+        {
+            // 12 independent chains × 4 doubles = 48 FMA ops per inner iteration
+            // Independent chains = no data dependency stalls = max throughput
+            var a = Vector256.Create(1.10, 1.11, 1.12, 1.13);
+            var b = Vector256.Create(1.20, 1.21, 1.22, 1.23);
+            var c = Vector256.Create(1.30, 1.31, 1.32, 1.33);
+            var d = Vector256.Create(1.40, 1.41, 1.42, 1.43);
+            var e = Vector256.Create(1.50, 1.51, 1.52, 1.53);
+            var f = Vector256.Create(1.60, 1.61, 1.62, 1.63);
+            var g = Vector256.Create(0.90, 0.91, 0.92, 0.93);
+            var h = Vector256.Create(0.80, 0.81, 0.82, 0.83);
+            var i = Vector256.Create(0.70, 0.71, 0.72, 0.73);
+            var j = Vector256.Create(0.60, 0.61, 0.62, 0.63);
+            var k = Vector256.Create(1.70, 1.71, 1.72, 1.73);
+            var l = Vector256.Create(1.80, 1.81, 1.82, 1.83);
+
+            // Two multiplier magnitudes — chains grow/shrink so they stay finite
+            var mulUp   = Vector256.Create(1.00000007);
+            var mulDown = Vector256.Create(0.99999993);
+            var addC    = Vector256.Create(0.00000001);
+
+            while (!token.IsCancellationRequested)
+            {
+                // 500 unrolled × 12 chains × 4 doubles = 24000 FMAs per outer iter
+                // No branch inside — pure FMA throughput
+                for (int n = 0; n < 500; n++)
+                {
+                    a = Fma.MultiplyAdd(a, mulUp,   addC);
+                    b = Fma.MultiplyAdd(b, mulUp,   addC);
+                    c = Fma.MultiplyAdd(c, mulUp,   addC);
+                    d = Fma.MultiplyAdd(d, mulUp,   addC);
+                    e = Fma.MultiplyAdd(e, mulUp,   addC);
+                    f = Fma.MultiplyAdd(f, mulUp,   addC);
+                    g = Fma.MultiplyAdd(g, mulDown, addC);
+                    h = Fma.MultiplyAdd(h, mulDown, addC);
+                    i = Fma.MultiplyAdd(i, mulDown, addC);
+                    j = Fma.MultiplyAdd(j, mulDown, addC);
+                    k = Fma.MultiplyAdd(k, mulUp,   addC);
+                    l = Fma.MultiplyAdd(l, mulDown, addC);
+                }
+
+                // Sink — JIT cannot eliminate any chain above because we read them
+                // Using addition so all 12 contribute; result passed to NoInlining call
+                var sum = Avx.Add(Avx.Add(Avx.Add(a, b), Avx.Add(c, d)),
+                          Avx.Add(Avx.Add(Avx.Add(e, f), Avx.Add(g, h)),
+                          Avx.Add(Avx.Add(i, j), Avx.Add(k, l))));
+                Sink(sum[0]);
+
+                Interlocked.Add(ref _totalIters, 500 * 12);
+            }
+        }
+        else
+        {
+            // Scalar fallback — 16 independent chains, fills out-of-order pipeline
+            double a=1.1,b=1.2,c=1.3,d=1.4,e=1.5,f=1.6,g=1.7,h=1.8,
+                   i2=1.9,j=2.0,k=2.1,l=2.2,m=2.3,nn=2.4,o=2.5,p=2.6;
+            while (!token.IsCancellationRequested)
+            {
+                for (int n = 0; n < 10000; n++)
+                {
+                    a=a*1.0000001+0.0000001; b=b*1.0000002+0.0000002;
+                    c=c*1.0000003+0.0000003; d=d*1.0000004+0.0000004;
+                    e=e*0.9999999+0.0000001; f=f*0.9999998+0.0000002;
+                    g=g*0.9999997+0.0000003; h=h*0.9999996+0.0000004;
+                    i2=i2*1.0000005+0.0000005; j=j*1.0000006+0.0000006;
+                    k=k*1.0000007+0.0000007;   l=l*1.0000008+0.0000008;
+                    m=m*0.9999995+0.0000005;   nn=nn*0.9999994+0.0000006;
+                    o=o*0.9999993+0.0000007;   p=p*0.9999992+0.0000008;
+                }
+                // Sink all 16 — JIT must keep them alive
+                Sink(a+b+c+d+e+f+g+h+i2+j+k+l+m+nn+o+p);
+                Interlocked.Add(ref _totalIters, 10000 * 16);
+            }
+        }
+    }
+
+    // ── Memory burn — saturates IMC + all DRAM channels ──────────────────────
+    // 3 passes per iteration:
+    //   1. Sequential AVX2 read+write (256-bit stores, max bandwidth)
+    //   2. Stride-127 (prime stride — busts prefetcher, forces cache misses)
+    //   3. Reverse sequential (different access pattern, keeps IMC busy)
+    // 256MB per thread — well above L3 (32MB on 7800X3D), forces real DRAM traffic
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void MemoryBurn(int idx, CancellationToken token)
+    {
+        int size = 32 * 1024 * 1024; // 256MB per thread (doubles)
+        double[] A, B;
+        try   { A = new double[size]; B = new double[size]; }
+        catch (OutOfMemoryException)
+        { size = 8 * 1024 * 1024; A = new double[size]; B = new double[size]; }
+
+        for (int n = 0; n < size; n++)
+        {
+            A[n] = 1.0 + idx * 0.000001 + n * 0.0000000001;
+            B[n] = 1.0000003 + n * 0.0000000002;
+        }
+
+        int stridePos = (idx * 127) % size;
+        var vAdd = Vector256.Create(0.0000001);
+
+        while (!token.IsCancellationRequested)
+        {
+            // Pass 1: sequential forward — hardware prefetcher maxed out
+            // AVX2: processes 4 doubles per instruction = 32 bytes/instruction
+            if (Avx.IsSupported)
+            {
+                unsafe
+                {
+                    fixed (double* pA = A, pB = B)
+                    {
+                        for (int n = 0; n <= size - 4; n += 4)
+                        {
+                            var va = Avx.LoadVector256(pA + n);
+                            var vb = Avx.LoadVector256(pB + n);
+                            Avx.Store(pA + n, Avx.Add(va, vb));
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (int n = 0; n < size; n++)
+                    A[n] = A[n] + B[n];
+            }
+
+            // Pass 2: stride-127 — non-power-of-2 stride defeats prefetcher
+            for (int n = 0; n < 2 * 1024 * 1024; n++)
+            {
+                A[stridePos] = A[stridePos] * 1.0000001 + B[stridePos];
+                stridePos = (stridePos + 127) % size;
+            }
+
+            // Pass 3: reverse sequential — different access pattern, IMC stays hot
+            if (Avx.IsSupported)
+            {
+                unsafe
+                {
+                    fixed (double* pA = A, pB = B)
+                    {
+                        for (int n = size - 4; n >= 0; n -= 4)
+                        {
+                            var va = Avx.LoadVector256(pA + n);
+                            var vb = Avx.LoadVector256(pB + n);
+                            Avx.Store(pA + n, Avx.Add(va, vAdd));
+                            _ = vb[0]; // read B to keep both arrays in traffic
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (int n = size - 1; n >= 0; n--)
+                    A[n] = A[n] + 0.0000001;
+            }
+
+            Interlocked.Add(ref _totalIters, (long)size * 2 + 2 * 1024 * 1024);
+        }
+    }
+
     static void BurnLoop(string mode, int idx, CancellationToken token)
     {
         switch (mode)
         {
-            // ── FMA Burn: 8 independent FP chains — max IPC, fits L1/L2 ─────
-            case "fma":
-            case "single":
-            {
-                double a=1.1,b=1.2,c=1.3,d=1.4,e=1.5,f=1.6,g=1.7,h=1.8+idx*0.001;
-                long local = 0;
-                while (!token.IsCancellationRequested)
-                {
-                    for (int i = 0; i < 100000; i++)
-                    {
-                        a=a*1.0000001+0.0000001; b=b*1.0000002+0.0000002;
-                        c=c*1.0000003+0.0000003; d=d*1.0000004+0.0000004;
-                        e=e*0.9999999+0.0000001; f=f*0.9999998+0.0000002;
-                        g=g*0.9999997+0.0000003; h=h*0.9999996+0.0000004;
-                        if (a>1e100||a<1e-100) { a=1.1; b=1.2; c=1.3; d=1.4; }
-                        if (e>1e100||e<1e-100) { e=1.5; f=1.6; g=1.7; h=1.8; }
-                    }
-                    local += 100000;
-                    Interlocked.Add(ref _totalIters, 100000);
-                }
+            // ── Test 1a: CPU Single Core ──────────────────────────────────────
+            // 1 thread, AVX2 FMA, keeps boost clock maxed, max single-core heat
+            case "cpu_single":
+                AvxFmaBurn(token);
                 break;
-            }
 
-            // ── Cache Bust: stride access through large buffer — busts L3 ────
-            case "cache":
-            {
-                int size = 8 * 1024 * 1024; // 64MB per thread
-                var buf = new double[size];
-                for (int i = 0; i < size; i++) buf[i] = i * 0.000001 + 1.0;
-                int pos = idx * 127;
-                double acc = 1.0;
-                long local = 0;
-                while (!token.IsCancellationRequested)
-                {
-                    for (int i = 0; i < 100000; i++)
-                    {
-                        acc = acc * 1.0000001 + buf[pos];
-                        buf[pos] = acc;
-                        pos = (pos + 127) % size; // stride busts cache
-                        // FMA burst
-                        double x = acc;
-                        x=x*1.1+0.1; x=x*1.1+0.1; x=x*1.1+0.1; x=x*1.1+0.1;
-                        x=x*0.9-0.1; x=x*0.9-0.1; x=x*0.9-0.1; x=x*0.9-0.1;
-                        acc += x * 1e-30;
-                        if (acc > 1e100 || acc < -1e100) { acc = 1.0; }
-                    }
-                    local += 100000;
-                    Interlocked.Add(ref _totalIters, 100000);
-                }
+            // ── Test 1b: CPU Multi Core ───────────────────────────────────────
+            // All threads, AVX2 FMA, max all-core load, max package thermals
+            // Equivalent to Prime95 Small FFT — highest possible CPU temp
+            case "cpu_multi":
+                AvxFmaBurn(token);
                 break;
-            }
 
-            // ── Memory Flood: sequential read+write — stresses IMC/DRAM ──────
+            // ── Test 2: Memory / IMC ──────────────────────────────────────────
+            // All threads, 256MB per thread sequential + stride
+            // Saturates DDR5-6000 dual channel, stresses IMC hard
+            // On 7800X3D: will stress the memory controller directly on the CCD
             case "memory":
-            case "vram":
+                MemoryBurn(idx, token);
+                break;
+
+            // ── Test 3: Combined — absolute max package power ─────────────────
+            // Spawns 2 sub-tasks per logical thread:
+            //   • Half threads → pure AVX2 FMA (max FPU heat)
+            //   • Half threads → pure memory flood (max IMC/DRAM)
+            // This is more effective than interleaving on the same thread because:
+            //   - FMA threads stay in L1/L2, always hitting execution units
+            //   - Memory threads always miss cache, always hitting DRAM
+            //   - Both pressures hit the CPU simultaneously → max TDP
+            case "combined":
             {
-                int size = 16 * 1024 * 1024; // 128MB per thread
-                double[] A, B;
-                try { A = new double[size]; B = new double[size]; }
-                catch (OutOfMemoryException)
-                { size = 4*1024*1024; A = new double[size]; B = new double[size]; }
-                for (int i = 0; i < size; i++) { A[i] = 1.0; B[i] = 1.0000001+idx*0.000001; }
-                long local = 0;
-                while (!token.IsCancellationRequested)
+                int cores     = Environment.ProcessorCount;
+                int fmaCount  = Math.Max(1, cores / 2);
+                int memCount  = cores - fmaCount;
+
+                // FMA threads
+                for (int t = 0; t < fmaCount; t++)
                 {
-                    for (int i = 0; i < size; i++) A[i] = A[i] + B[i];
-                    local += size;
-                    Interlocked.Add(ref _totalIters, size);
+                    new Thread(() => AvxFmaBurn(token))
+                    {
+                        IsBackground = true,
+                        Priority     = ThreadPriority.Highest,
+                    }.Start();
                 }
+
+                // Memory threads
+                for (int t = 0; t < memCount; t++)
+                {
+                    int tidx = t;
+                    new Thread(() => MemoryBurn(tidx, token))
+                    {
+                        IsBackground = true,
+                        Priority     = ThreadPriority.Highest,
+                    }.Start();
+                }
+
+                // This thread also burns FMA so we use all cores
+                AvxFmaBurn(token);
                 break;
             }
 
-            // ── Default fallback ──────────────────────────────────────────────
             default:
-                goto case "fma";
+                goto case "cpu_multi";
         }
     }
 }
