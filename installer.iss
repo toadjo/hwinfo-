@@ -34,8 +34,6 @@ Name: "desktopicon"; Description: "Create a &Desktop shortcut"; GroupDescription
 [Files]
 Source: "dist\HWInfoMonitor\HWInfoMonitor.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\HWInfoMonitor\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "stress_worker.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "stress_worker.py"; DestDir: "{app}\_internal"; Flags: ignoreversion
 
 [Registry]
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\{#AppExeName}"; ValueData: "RUNASADMIN"; Flags: uninsdeletevalue

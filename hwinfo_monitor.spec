@@ -1,38 +1,23 @@
 # hwinfo_monitor.spec
-import os
-from PyInstaller.utils.hooks import collect_all
-
-_stress_dll = os.path.join('core', 'stress_native.dll')
-_stress_c   = os.path.join('core', 'stress_native.c')
-_extra_binaries = [(_stress_dll, 'core')] if os.path.exists(_stress_dll) else []
-_extra_datas    = [(_stress_c,   'core')] if os.path.exists(_stress_c)   else []
-
-# Properly collect numpy — hiddenimports alone misses the compiled .pyd extensions
-numpy_datas, numpy_binaries, numpy_hiddenimports = collect_all('numpy')
-
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=_extra_binaries + numpy_binaries,
+    binaries=[],
     datas=[
         ('dist\\LHMBridge', 'LHMBridge'),
-        ('stress_worker.py', '.'),
         ('core', 'core'),
-    ] + _extra_datas + numpy_datas,
+    ],
     hiddenimports=[
         'wmi', 'psutil', 'tkinter', 'tkinter.font',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFilter',
         'PIL._imaging', 'PIL._tkinter_finder',
-        'numpy', 'numpy.core', 'numpy.core._multiarray_umath',
-        'numpy.core.multiarray', 'numpy.linalg',
-        'numpy.linalg._umath_linalg', 'numpy.random',
-        'threadpoolctl', 'ctypes', 'ctypes.wintypes',
-    ] + numpy_hiddenimports,
+        'ctypes', 'ctypes.wintypes',
+    ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=['numpy', 'threadpoolctl'],
     cipher=block_cipher,
     noarchive=False,
 )
