@@ -4,6 +4,20 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.5.6 Beta] - 2026-03-23
+
+### Added
+- **RAM Stability Test** — 15 pattern tests (Solid 0x00/0xFF, Checkerboard, Walking Ones/Zeros, March C-, Mats+, Address XOR, Byte Rotate, Random Seed, etc.) running on 70% of available RAM; write + verify pass per test; errors reported with exact cell address and expected/actual value
+- RAM test integrated into CPU Tests tab as a scrollable card below stress tests; click card → active view with live log, progress header (`Test X of 15 — pattern name`), and Stop button; Back button returns to menu
+- `/ram/start`, `/ram/stop`, `/ram/status` HTTP endpoints added to LHMBridge
+- GPU Stress tab replaced with "Coming Soon" placeholder — full GPU stress requires OpenGL/Vulkan rendering pipeline
+
+### Fixed
+- Back button in RAM active view not working — `_show_page_in_tab` now hides `ram_active` frame before showing menu
+- RAM card rendered outside scrollable canvas — now placed inside `cpu_mi` inner frame using `grid` alongside CPU stress cards
+
+---
+
 ## [v0.5.5 Beta] - 2026-03-23
 
 ### Changed

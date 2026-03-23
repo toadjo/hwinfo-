@@ -1927,6 +1927,8 @@ def main():
             _tabs[tab_name]["page"][0] = page
             _tabs[tab_name]["menu"].place_forget()
             _tabs[tab_name]["active"].place_forget()
+            if "ram_active" in _tabs[tab_name]:
+                _tabs[tab_name]["ram_active"].place_forget()
             _tabs[tab_name][page].place(relx=0, rely=0, relwidth=1, relheight=1)
 
         def _make_tab(name, label):
@@ -2096,16 +2098,179 @@ def main():
             {"section": "CPU Stress Tests", "title": "CPU + Memory",    "badge": "ALL",  "accent": "#06b6d4", "cmd": "combined",
              "desc": f"All {_ncores} threads · FMA + memory flood · max package power"},
         ]
-        GPU_TESTS = [
-            {"section": "GPU Stress", "title": "GPU Core",     "badge": "FP32", "accent": ACCENT_GPU,    "cmd": "gpu_core",     "desc": "Float32 compute throughput"},
-            {"section": "GPU Stress", "title": "GPU VRAM",     "badge": "VRAM", "accent": "#ea580c",     "cmd": "gpu_vram",     "desc": "4GB VRAM allocation + R/W"},
-            {"section": "GPU Stress", "title": "GPU Combined", "badge": "ALL",  "accent": ACCENT_STRESS, "cmd": "gpu_combined", "desc": "Compute + VRAM simultaneously"},
-        ]
+        GPU_TESTS = []
 
         _build_menu("cpu", CPU_TESTS)
-        _build_menu("gpu", GPU_TESTS)
-        _show_tab("cpu")
 
+        # ── GPU tab — Coming Soon ─────────────────────────────────────────────
+        gpu_menu_frame = _tabs["gpu"]["menu"]
+        gpu_menu_frame.columnconfigure(0, weight=1)
+        gpu_menu_frame.rowconfigure(0, weight=1)
+        cs_frame = tk.Frame(gpu_menu_frame, bg=BG)
+        cs_frame.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(cs_frame, text="🚧", bg=BG, fg="#555",
+                 font=("Segoe UI", 32)).pack(pady=(0, 8))
+        tk.Label(cs_frame, text="GPU Stress — Coming Soon",
+                 bg=BG, fg="#6b7280",
+                 font=("Segoe UI", 13, "bold")).pack()
+        tk.Label(cs_frame,
+                 text="GPU stress testing requires a rendering engine\n(OpenGL/Vulkan) to reach maximum thermal load.\nThis feature is planned for a future release.",
+                 bg=BG, fg="#374151",
+                 font=("Segoe UI", 9), justify="center").pack(pady=(6, 0))
+
+        # ── RAM Stability Test — card below CPU stress cards ─────────────────
+        cpu_menu_frame = _tabs["cpu"]["menu"]
+
+        tk.Frame(cpu_menu_frame, bg="#1e2a3a", height=1).pack(
+            fill="x", padx=16, pady=(8, 0))
+        tk.Label(cpu_menu_frame, text="RAM STABILITY TEST", bg=BG, fg="#374151",
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=16, pady=(6, 4))
+
+        ram_card = tk.Frame(cpu_menu_frame, bg="#0f0f1e",
+                            highlightbackground="#3b82f6", highlightthickness=2,
+                            cursor="hand2")
+        ram_card.pack(fill="x", padx=10, pady=(0, 10), ipady=6)
+
+        tk.Label(ram_card, text="RAM", bg="#3b82f6", fg="white",
+                 font=("Segoe UI", 8, "bold"), padx=8, pady=3).pack(
+                 anchor="nw", padx=10, pady=(10, 4))
+        tk.Label(ram_card, text="RAM Stability Test",
+                 bg="#0f0f1e", fg="white",
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10)
+        tk.Label(ram_card,
+                 text="15 pattern tests · write + verify · detects XMP/EXPO instability",
+                 bg="#0f0f1e", fg="#444",
+                 font=("Segoe UI", 8)).pack(anchor="w", padx=10, pady=(2, 10))
+
+        # ── RAM active view (same structure as CPU active views) ──────────────
+        ram_active = tk.Frame(content, bg=BG)
+        ram_active.columnconfigure(0, weight=1)
+        ram_active.rowconfigure(1, weight=1)
+
+        ram_hdr = tk.Frame(ram_active, bg="#0d0d1a")
+        ram_hdr.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+        tk.Button(ram_hdr, text="< Back",
+                  bg="#0d0d1a", fg="#888",
+                  font=("Segoe UI", 9), relief="flat", bd=0,
+                  padx=12, pady=10, cursor="hand2",
+                  command=lambda: _show_page_in_tab("cpu", "menu")).pack(side="left")
+
+        ram_title_lbl = tk.Label(ram_hdr, text="RAM Stability Test",
+                                 bg="#0d0d1a", fg="white",
+                                 font=("Segoe UI", 12, "bold"))
+        ram_title_lbl.pack(side="left", padx=12)
+
+        ram_progress_lbl = tk.Label(ram_hdr, text="",
+                                    bg="#0d0d1a", fg="#3b82f6",
+                                    font=("Segoe UI", 10))
+        ram_progress_lbl.pack(side="left", padx=(0, 12))
+
+        ram_stop_btn = tk.Button(ram_hdr, text="  Stop  ",
+                                 bg="#7a0000", fg="white",
+                                 font=("Segoe UI", 10, "bold"),
+                                 relief="flat", padx=12, pady=6, cursor="hand2")
+        ram_stop_btn.pack(side="right", padx=12, pady=6)
+
+        ram_log = tk.Text(ram_active, bg="#080810", fg="#d0d0d0",
+                          font=("Consolas", 10), bd=0, relief="flat",
+                          state="disabled", wrap="none")
+        ram_log.grid(row=1, column=0, sticky="nsew")
+
+        ram_vsb = tk.Scrollbar(ram_active, orient="vertical", command=ram_log.yview)
+        ram_vsb.grid(row=1, column=1, sticky="ns")
+        ram_log.configure(yscrollcommand=ram_vsb.set)
+
+        ram_log.tag_configure("pass",  foreground="#22c55e")
+        ram_log.tag_configure("fail",  foreground="#ef4444")
+        ram_log.tag_configure("error", foreground="#f87171")
+        ram_log.tag_configure("info",  foreground="#6b7280")
+        ram_log.tag_configure("head",  foreground="#3b82f6")
+
+        # Register ram_active as a page in the cpu tab
+        _tabs["cpu"]["ram_active"] = ram_active
+
+        _ram_running  = [False]
+        _ram_log_seen = [0]
+
+        def _ram_write(msg):
+            ram_log.config(state="normal")
+            tag = "info"
+            if "✓ PASS" in msg or "✓ RAM" in msg: tag = "pass"
+            elif "✗" in msg:                        tag = "fail"
+            elif "ERROR" in msg:                    tag = "error"
+            elif msg.startswith("Test "):           tag = "head"
+            ram_log.insert("end", msg + "\n", tag)
+            ram_log.see("end")
+            ram_log.config(state="disabled")
+
+        def _show_ram_active():
+            _tabs["cpu"]["menu"].place_forget()
+            _tabs["cpu"]["active"].place_forget()
+            _tabs["cpu"]["ram_active"].place(relx=0, rely=0, relwidth=1, relheight=1)
+            _show_tab("cpu")
+
+        def _ram_poll():
+            if not _ram_running[0]:
+                return
+            try:
+                import urllib.request as _ur, json as _j
+                r = _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/status", timeout=2)
+                d = _j.loads(r.read())
+            except Exception:
+                root.after(800, _ram_poll)
+                return
+            phase  = d.get("phase", "idle")
+            cur    = d.get("current_test", 0)
+            total  = d.get("total_tests", 15)
+            name   = d.get("current_name", "")
+            errors = d.get("total_errors", 0)
+            log    = d.get("log", [])
+            for line in log[_ram_log_seen[0]:]:
+                _ram_write(line)
+            _ram_log_seen[0] = len(log)
+            if phase == "running":
+                ram_progress_lbl.config(
+                    text=f"Test {cur} of {total}  —  {name}"
+                         + (f"  ·  {errors} errors" if errors else ""))
+            elif phase in ("done", "stopped", "idle"):
+                result = "✓ No errors" if errors == 0 else f"✗ {errors} errors"
+                ram_progress_lbl.config(
+                    text=f"{'Done' if phase == 'done' else 'Stopped'}  ·  {result}")
+                ram_stop_btn.config(state="disabled")
+                _ram_running[0] = False
+                return
+            root.after(800, _ram_poll)
+
+        def _ram_start():
+            try:
+                import urllib.request as _ur
+                _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/start", timeout=2)
+            except Exception as ex:
+                return
+            ram_log.config(state="normal")
+            ram_log.delete("1.0", "end")
+            ram_log.config(state="disabled")
+            _ram_log_seen[0] = 0
+            _ram_running[0]  = True
+            ram_progress_lbl.config(text="Starting...")
+            ram_stop_btn.config(state="normal")
+            _show_ram_active()
+            root.after(800, _ram_poll)
+
+        def _ram_stop():
+            try:
+                import urllib.request as _ur
+                _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/stop", timeout=2)
+            except Exception:
+                pass
+
+        ram_stop_btn.config(command=_ram_stop)
+
+        for w in [ram_card] + ram_card.winfo_children():
+            w.bind("<Button-1>", lambda e: _ram_start())
+
+        _show_tab("cpu")
         stress_status = status_label
         stress_win_alive = [True]
 

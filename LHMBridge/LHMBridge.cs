@@ -199,6 +199,13 @@ class LHMBridge
                     buf = Encoding.UTF8.GetBytes(ready ? "true" : "false");
                     res.ContentType = "text/plain";
                 }
+                else if (path.StartsWith("/ram/"))
+                {
+                    string action = path[5..];
+                    string result = RamTester.HandleCommand(action);
+                    buf = Encoding.UTF8.GetBytes(result);
+                    res.ContentType = "application/json";
+                }
                 else if (path.StartsWith("/stress/"))
                 {
                     string action = path[8..];
@@ -778,6 +785,182 @@ static class StressBurner
             default:
                 goto case "cpu_multi";
         }
+    }
+}
+
+// ── RAM Tester — TM5-style pattern tests ─────────────────────────────────────
+// Runs inside Windows user space — tests allocated virtual memory.
+// Finds errors caused by unstable XMP/EXPO timings, IMC instability, etc.
+// 15 tests total, each with a different pattern, reported per-test.
+static class RamTester
+{
+    static Thread?   _thread;
+    static volatile bool _running  = false;
+    static volatile bool _stopReq  = false;
+    static readonly object _lock   = new();
+
+    // Live state (read by /ram/status)
+    static int    _currentTest  = 0;
+    static int    _totalTests   = 15;
+    static long   _totalErrors  = 0;
+    static string _currentName  = "";
+    static string _phase        = "idle"; // idle | running | done | stopped
+    static readonly List<string> _log = new();
+
+    // ── Pattern definitions (TM5-inspired) ───────────────────────────────────
+    static readonly (string Name, Func<int, ulong> Pattern)[] _tests = new[]
+    {
+        ("Solid 0x00000000",    (Func<int,ulong>)(_ => 0x0000000000000000UL)),
+        ("Solid 0xFFFFFFFF",    _ => 0xFFFFFFFFFFFFFFFFUL),
+        ("Checkerboard A",      _ => 0xAAAAAAAAAAAAAAAAUL),
+        ("Checkerboard B",      _ => 0x5555555555555555UL),
+        ("Walking Ones",        i => 1UL << (i % 64)),
+        ("Walking Zeros",       i => ~(1UL << (i % 64))),
+        ("March C- Up",         i => (ulong)(i & 1) == 0 ? 0UL : 0xFFFFFFFFFFFFFFFFUL),
+        ("March C- Down",       i => (ulong)(i & 1) == 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL),
+        ("Mats+ Pattern",       i => (ulong)i * 0x0101010101010101UL),
+        ("Alternating 0x0F",    _ => 0x0F0F0F0F0F0F0F0FUL),
+        ("Alternating 0xF0",    _ => 0xF0F0F0F0F0F0F0F0UL),
+        ("Addr XOR Pattern",    i => (ulong)i ^ 0xDEADBEEFDEADBEEFUL),
+        ("Double Checkerboard", i => (ulong)(i % 2) * 0xFFFFFFFFFFFFFFFFUL),
+        ("Byte Rotate",         i => (ulong)(0xABUL << ((i % 8) * 8))),
+        ("Random Seed",         i => (ulong)i * 6364136223846793005UL + 1442695040888963407UL),
+    };
+
+    public static string HandleCommand(string action)
+    {
+        if (action == "start")
+        {
+            lock (_lock)
+            {
+                if (_running) return "{\"status\":\"already_running\"}";
+                _stopReq    = false;
+                _running    = true;
+                _totalErrors = 0;
+                _currentTest = 0;
+                _phase       = "running";
+                _log.Clear();
+                _thread = new Thread(RunTests) { IsBackground = true };
+                _thread.Start();
+            }
+            return "{\"status\":\"started\"}";
+        }
+        else if (action == "stop")
+        {
+            _stopReq = true;
+            return "{\"status\":\"stopping\"}";
+        }
+        else if (action == "status")
+        {
+            string logSnapshot;
+            lock (_log) { logSnapshot = JsonSerializer.Serialize(_log); }
+            return $"{{\"phase\":\"{_phase}\"," +
+                   $"\"current_test\":{_currentTest}," +
+                   $"\"total_tests\":{_totalTests}," +
+                   $"\"current_name\":\"{_currentName}\"," +
+                   $"\"total_errors\":{_totalErrors}," +
+                   $"\"log\":{logSnapshot}}}";
+        }
+        return "{\"error\":\"unknown command\"}";
+    }
+
+    static void AddLog(string msg)
+    {
+        lock (_log)
+        {
+            _log.Add(msg);
+            if (_log.Count > 500) _log.RemoveAt(0);
+        }
+        Console.WriteLine($"[RAM] {msg}");
+    }
+
+    static void RunTests()
+    {
+        // Allocate as much RAM as safely possible (up to 75% of available)
+        long available  = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        long allocBytes = (long)(available * 0.70);
+        // Align to ulong size
+        int count = (int)Math.Min(allocBytes / 8, int.MaxValue - 16L);
+
+        AddLog($"Allocating {allocBytes / 1024 / 1024} MB for testing...");
+
+        ulong[]? buf;
+        try { buf = new ulong[count]; }
+        catch (OutOfMemoryException)
+        {
+            count = count / 2;
+            try { buf = new ulong[count]; }
+            catch { AddLog("ERROR: Could not allocate memory."); _phase = "done"; _running = false; return; }
+        }
+
+        AddLog($"Allocated {(long)count * 8 / 1024 / 1024} MB ({count:N0} ulong cells).");
+        AddLog($"Running {_totalTests} tests...");
+        AddLog("─────────────────────────────────────");
+
+        long totalErrors = 0;
+
+        for (int t = 0; t < _tests.Length; t++)
+        {
+            if (_stopReq) break;
+
+            _currentTest = t + 1;
+            _currentName = _tests[t].Name;
+            var patternFn = _tests[t].Pattern;
+
+            AddLog($"Test {t+1}/{_totalTests}: {_currentName}");
+
+            // ── Write pass ────────────────────────────────────────────────────
+            for (int i = 0; i < count; i++)
+            {
+                if (_stopReq) break;
+                buf[i] = patternFn(i);
+            }
+            if (_stopReq) break;
+
+            // ── Read+verify pass ──────────────────────────────────────────────
+            long errors = 0;
+            for (int i = 0; i < count; i++)
+            {
+                ulong expected = patternFn(i);
+                ulong actual   = buf[i];
+                if (actual != expected)
+                {
+                    errors++;
+                    if (errors <= 3) // log first 3 errors per test
+                        AddLog($"  ERROR at cell {i}: expected 0x{expected:X16}, got 0x{actual:X16}");
+                }
+            }
+
+            totalErrors        += errors;
+            _totalErrors        = totalErrors;
+
+            if (errors == 0)
+                AddLog($"  ✓ PASS — no errors");
+            else
+                AddLog($"  ✗ FAIL — {errors:N0} errors found in test {t+1}");
+
+            AddLog("─────────────────────────────────────");
+        }
+
+        buf = null;
+        GC.Collect();
+
+        if (_stopReq)
+        {
+            AddLog("Test stopped by user.");
+            _phase = "stopped";
+        }
+        else
+        {
+            AddLog($"All tests complete. Total errors: {totalErrors}");
+            if (totalErrors == 0)
+                AddLog("✓ RAM appears stable with current settings.");
+            else
+                AddLog($"✗ {totalErrors} errors detected — check XMP/EXPO timings or voltages.");
+            _phase = "done";
+        }
+
+        _running = false;
     }
 }
 
