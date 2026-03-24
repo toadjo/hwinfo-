@@ -1,3 +1,4 @@
+; installer.iss — HWInfo Monitor v0.5.6 Beta
 ; HWInfo Monitor - Inno Setup Installer Script
 
 #define AppName "HWInfo Monitor"
@@ -44,7 +45,16 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; Launch with explicit RunAs so UAC prompt appears immediately — no "access denied" surprise
+Filename: "{cmd}"; Parameters: "/c start """" /wait ""{app}\{#AppExeName}"""; \
+  Description: "Launch {#AppName} (requires Administrator)"; \
+  Flags: nowait postinstall skipifsilent runascurrentuser; \
+  Check: not IsAdminInstallMode
+
+Filename: "{app}\{#AppExeName}"; \
+  Description: "Launch {#AppName} (requires Administrator)"; \
+  Flags: nowait postinstall skipifsilent runasoriginaluser; \
+  Check: IsAdminInstallMode
 
 [Code]
 
@@ -63,6 +73,16 @@ begin
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Result := False;
   end;
+end;
+
+// ── Admin requirement notice (shown on Welcome page) ──────────
+procedure InitializeWizard();
+begin
+  WizardForm.WelcomeLabel2.Caption :=
+    WizardForm.WelcomeLabel2.Caption + #13#10#13#10 +
+    'IMPORTANT: HWInfo Monitor requires Administrator rights to ' +
+    'access hardware sensors (CPU temperatures, fan speeds, etc.). ' +
+    'The application will always request elevation when launched.';
 end;
 
 // ── Auto-uninstall previous version ───────────────────────────
