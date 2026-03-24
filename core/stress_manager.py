@@ -1,3 +1,4 @@
+# stress_manager.py — HWInfo Monitor v0.5.6 Beta
 import queue
 import threading
 import time

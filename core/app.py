@@ -1,3 +1,4 @@
+# app.py — HWInfo Monitor v0.5.6 Beta
 import collections
 import ctypes
 import queue

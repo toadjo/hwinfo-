@@ -1,4 +1,5 @@
 @echo off
+:: build_all.bat — HWInfo Monitor v0.5.6 Beta
 title HWInfo Monitor - Build Script
 cd /d "%~dp0"
 
@@ -47,10 +48,10 @@ if exist .pyinstaller rmdir /s /q .pyinstaller
 for /d /r "%~dp0" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D"
 for /r "%~dp0" %%F in (*.pyc) do @if exist "%%F" del /f /q "%%F" >nul 2>&1
 for /r "%~dp0" %%F in (*.pyo) do @if exist "%%F" del /f /q "%%F" >nul 2>&1
-:: Kill any running instance
 taskkill /f /im HWInfoMonitor.exe >nul 2>&1
 taskkill /f /im LHMBridge.exe >nul 2>&1
 echo Done.
+
 echo [1/5] Installing Python dependencies...
 %PYTHON% -m pip install -r requirements-build.txt --quiet
 echo Done.

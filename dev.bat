@@ -1,4 +1,5 @@
 @echo off
+:: dev.bat — HWInfo Monitor v0.5.6 Beta
 cd /d "%~dp0"
 
 :: Auto-elevate to admin (required for LHMBridge ring0 access)
@@ -53,8 +54,8 @@ if errorlevel 1 (
 )
 echo [Dev] LHMBridge built.
 
-:: ── Install dependencies if missing ─────────────────────────────────────────
-%PYTHON% -c "import PIL, numpy, psutil, wmi, threadpoolctl" >nul 2>&1
+:: ── Install dependencies if missing ──────────────────────────────────────────
+%PYTHON% -c "import PIL, psutil, wmi" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [Dev] Installing dependencies...
     %PYTHON% -m pip install -r "%~dp0requirements.txt" --quiet
@@ -63,15 +64,21 @@ if %errorlevel% neq 0 (
 :: ── Clear pycache ─────────────────────────────────────────────────────────────
 for /d /r "%~dp0" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D" >nul 2>&1
 
-:: Kill any existing LHMBridge
+:: ── Kill any existing LHMBridge and start fresh ───────────────────────────────
 taskkill /f /im LHMBridge.exe >nul 2>&1
-
-:: Start LHMBridge
 start "" /b dist\LHMBridge\LHMBridge.exe --port=8086
 
-:: Wait for sensors to initialize
-echo Waiting for sensors...
-timeout /t 6 /nobreak >nul
+:: ── Wait for LHMBridge to be ready (poll instead of fixed wait) ───────────────
+echo [Dev] Waiting for LHMBridge...
+set READY=0
+for /l %%i in (1,1,30) do (
+    if !READY!==0 (
+        curl -s -o nul -w "%%{http_code}" http://127.0.0.1:8086/ready 2>nul | findstr "200" >nul 2>&1
+        if !errorlevel!==0 set READY=1
+        if !READY!==0 timeout /t 1 /nobreak >nul
+    )
+)
+echo [Dev] LHMBridge ready.
 
-:: Run the app
+:: ── Run the app ───────────────────────────────────────────────────────────────
 %PYTHON% main.py

@@ -1,4 +1,5 @@
 // LHMBridge.cs — Sensor bridge with real AMD memory timing support
+// HWInfo Monitor v0.5.6 Beta
 // Uses LibreHardwareMonitor for all sensors + ZenStates-Core for AMD UMC timings
 // Run as Administrator (required for ring0 access)
 
@@ -305,6 +306,8 @@ class LHMBridge
         foreach (var s in hw.Sensors)
         {
             if (s.Value == null) continue;
+            // Skip clearly invalid temperature readings (0°C = uninitialized sensor)
+            if (s.SensorType == SensorType.Temperature && s.Value <= 0) continue;
             result[key].Add(new SensorEntry
             {
                 Name  = s.Name,
