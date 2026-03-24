@@ -1,4 +1,4 @@
-# app.py — HWInfo Monitor v0.5.9 Beta
+# app.py — HWInfo Monitor v0.6.0 Beta
 import collections
 import ctypes
 import queue
@@ -2142,7 +2142,51 @@ def main():
         tk.Label(ram_card,
                  text="15 pattern tests · write + verify · detects XMP/EXPO instability",
                  bg="#0f0f1e", fg="#444",
-                 font=("Segoe UI", 8)).pack(anchor="w", padx=10, pady=(2, 10))
+                 font=("Segoe UI", 8)).pack(anchor="w", padx=10, pady=(2, 6))
+
+        # ── RAM size picker ───────────────────────────────────────────────────
+        ram_size_frame = tk.Frame(ram_card, bg="#0f0f1e")
+        ram_size_frame.pack(anchor="w", padx=10, pady=(0, 10))
+
+        tk.Label(ram_size_frame, text="Test size:", bg="#0f0f1e", fg="#6b7280",
+                 font=("Segoe UI", 8)).pack(side="left")
+
+        _RAM_SIZES = [("256 MB", 256), ("512 MB", 512), ("1 GB", 1024),
+                      ("2 GB", 2048), ("4 GB", 4096), ("Auto (70%)", 0)]
+        _ram_size_mb = [0]  # 0 = auto
+
+        def _make_size_btn(label, mb, frame):
+            is_auto = (mb == 0)
+            btn = tk.Button(
+                frame, text=label,
+                bg="#1e2a3a" if not is_auto else "#163a5f",
+                fg="white" if not is_auto else "#3b82f6",
+                font=("Segoe UI", 8), relief="flat",
+                padx=6, pady=2, cursor="hand2",
+            )
+            btn.pack(side="left", padx=(4, 0))
+            return btn
+
+        _size_btns = []
+        for _lbl, _mb in _RAM_SIZES:
+            _b = _make_size_btn(_lbl, _mb, ram_size_frame)
+            _size_btns.append((_b, _mb))
+
+        def _select_ram_size(chosen_mb):
+            _ram_size_mb[0] = chosen_mb
+            for btn, mb in _size_btns:
+                active = (mb == chosen_mb)
+                btn.config(
+                    bg="#163a5f" if active else "#1e2a3a",
+                    fg="#3b82f6" if active else "white",
+                )
+
+        # Wire each button — must use default arg to capture mb correctly
+        for btn, mb in _size_btns:
+            btn.config(command=lambda m=mb: _select_ram_size(m))
+
+        # Default selection: Auto
+        _select_ram_size(0)
 
         # ── RAM active view (same structure as CPU active views) ──────────────
         ram_active = tk.Frame(content, bg=BG)
@@ -2246,16 +2290,21 @@ def main():
 
         def _ram_start():
             try:
-                import urllib.request as _ur
-                _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/start", timeout=2)
-            except Exception as ex:
+                import urllib.request as _ur, urllib.parse as _up
+                mb = _ram_size_mb[0]
+                url = f"http://127.0.0.1:{bridge.port}/ram/start"
+                if mb > 0:
+                    url += f"?mb={mb}"
+                _ur.urlopen(url, timeout=2)
+            except Exception:
                 return
             ram_log.config(state="normal")
             ram_log.delete("1.0", "end")
             ram_log.config(state="disabled")
             _ram_log_seen[0] = 0
             _ram_running[0]  = True
-            ram_progress_lbl.config(text="Starting...")
+            size_label = f"{_ram_size_mb[0]} MB" if _ram_size_mb[0] > 0 else "Auto"
+            ram_progress_lbl.config(text=f"Starting… ({size_label})")
             ram_stop_btn.config(state="normal")
             _show_ram_active()
             root.after(800, _ram_poll)
@@ -2269,7 +2318,14 @@ def main():
 
         ram_stop_btn.config(command=_ram_stop)
 
-        for w in [ram_card] + ram_card.winfo_children():
+        # Bind clicks on the card itself and its direct label children only —
+        # exclude the size picker frame and its buttons so clicking a size
+        # button doesn't also launch the test.
+        _ram_click_widgets = [ram_card] + [
+            w for w in ram_card.winfo_children()
+            if w is not ram_size_frame
+        ]
+        for w in _ram_click_widgets:
             w.bind("<Button-1>", lambda e: _ram_start())
 
         _show_tab("cpu")

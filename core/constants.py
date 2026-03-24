@@ -1,4 +1,4 @@
-APP_VERSION = "v0.5.9 Beta"
+APP_VERSION = "v0.6.0 Beta"
 
 # Theme colors — Dashboard style
 BG = "#0a0e1a"

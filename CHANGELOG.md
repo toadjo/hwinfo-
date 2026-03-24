@@ -4,6 +4,19 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.6.0 Beta] - 2026-03-24
+
+### Changed
+- **FP32 stress engine** — `AvxFmaBurn` switched from `Vector256<double>` (FP64, 12 chains × 4 doubles) to `Vector256<float>` (FP32, 24 chains × 8 floats); FP32 FMA throughput is 2× FP64 on all modern x86 CPUs, producing significantly higher thermal output — equivalent to Prime95 Small FFT
+- **Combined mode rewritten** — previously split threads half FMA / half memory, which left half the CPU's FP units idle; now every thread runs `AvxFmaMemBurn`: 8 FMA outer iterations followed by one 64MB sequential memory pass, so all cores simultaneously saturate both FP execution ports and DRAM bandwidth for maximum package power
+- **RAM Stability Test size picker** — user can now choose test size before starting: 256 MB, 512 MB, 1 GB, 2 GB, 4 GB, or Auto (70% available); selection is highlighted in the card UI; chosen MB is passed to `/ram/start?mb=N`; Auto caps at 90% available to prevent OOM
+
+### Fixed
+- RAM card size buttons no longer accidentally trigger test launch when clicked (size picker excluded from card click binding)
+- `/ram/start` now accepts optional `?mb=N` query parameter; `RamTester` parses it and caps at 90% of available RAM with a log message if capped; OOM fallback now logs the reduced size
+
+---
+
 ## [v0.5.9 Beta] - 2026-03-24
 
 ### Fixed
