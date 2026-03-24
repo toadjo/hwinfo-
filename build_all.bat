@@ -1,5 +1,5 @@
 @echo off
-:: build_all.bat — HWInfo Monitor v0.5.6 Beta
+:: build_all.bat — HWInfo Monitor v0.5.9 Beta
 title HWInfo Monitor - Build Script
 cd /d "%~dp0"
 

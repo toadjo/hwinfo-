@@ -1,10 +1,11 @@
-# app.py — HWInfo Monitor v0.5.6 Beta
+# app.py — HWInfo Monitor v0.5.9 Beta
 import collections
 import ctypes
 import queue
 import re
 import socket
 import sys
+import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
@@ -2282,24 +2283,73 @@ def main():
                 tab_name = stress_log_boxes.get(card_id)
                 if tab_name in ("cpu", "gpu"):
                     _write_log(tab_name, msg)
-            root.after(250, process_log_queue)
+            root.after(100, process_log_queue)
+
+        # Guards against two concurrent update_stress_temps loops running at
+        # the same time (can happen if _apply fires late while a second fetch
+        # has already been dispatched).
+        _temp_loop_active = [False]
 
         def update_stress_temps():
             if not stress_win_alive[0]:
                 return
-            try:
-                cpu_t = bridge.get_cpu_temp()
-                gpu_t = bridge.get_primary_gpu_temp()
-                if cpu_t is not None or gpu_t is not None:
-                    stress_status.config(text="Live", fg="#00ff88")
-                else:
-                    stress_status.config(text="Offline - LHMBridge not running", fg="#ff4444")
-                graph_cpu_temps.append(cpu_t)
-                graph_gpu_temps.append(gpu_t)
-            except tk.TclError:
-                stress_win_alive[0] = False
+            if _temp_loop_active[0]:
+                # Another iteration is already in flight — skip, it will
+                # reschedule itself when it finishes.
                 return
-            root.after(1000, update_stress_temps)
+            _temp_loop_active[0] = True
+
+            def _fetch():
+                # Fetch both temps concurrently so total wait is max(t1,t2)
+                # instead of t1+t2 (worst case was 2s sequential before).
+                cpu_result = [None]
+                gpu_result = [None]
+
+                def _get_cpu():
+                    try:
+                        cpu_result[0] = bridge.get_cpu_temp()
+                    except Exception:
+                        pass
+
+                def _get_gpu():
+                    try:
+                        gpu_result[0] = bridge.get_primary_gpu_temp()
+                    except Exception:
+                        pass
+
+                t_cpu = threading.Thread(target=_get_cpu, daemon=True)
+                t_gpu = threading.Thread(target=_get_gpu, daemon=True)
+                t_cpu.start()
+                t_gpu.start()
+                t_cpu.join(timeout=2)
+                t_gpu.join(timeout=2)
+
+                # Always schedule _apply — even on exception — so the loop
+                # never dies silently.
+                try:
+                    root.after(0, lambda: _apply(cpu_result[0], gpu_result[0]))
+                except Exception:
+                    _temp_loop_active[0] = False
+
+            def _apply(cpu_t, gpu_t):
+                _temp_loop_active[0] = False          # release the guard
+                if not stress_win_alive[0]:
+                    return
+                try:
+                    if cpu_t is not None or gpu_t is not None:
+                        stress_status.config(text="Live", fg="#00ff88")
+                    else:
+                        stress_status.config(text="Offline - LHMBridge not running", fg="#ff4444")
+                    graph_cpu_temps.append(cpu_t)
+                    graph_gpu_temps.append(gpu_t)
+                except tk.TclError:
+                    stress_win_alive[0] = False
+                    return
+                # Reschedule only from _apply — single point of rescheduling
+                # prevents duplicate loops from forming.
+                root.after(500, update_stress_temps)
+
+            threading.Thread(target=_fetch, daemon=True).start()
 
         update_stress_temps()
         process_log_queue()

@@ -1,5 +1,5 @@
 @echo off
-:: dev.bat — HWInfo Monitor v0.5.6 Beta
+:: dev.bat — HWInfo Monitor v0.5.9 Beta
 cd /d "%~dp0"
 
 :: Auto-elevate to admin (required for LHMBridge ring0 access)
@@ -8,6 +8,9 @@ if %errorlevel% neq 0 (
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
+
+:: Delayed expansion is required for the !READY! variable inside the for loop
+setlocal enabledelayedexpansion
 
 :: ── Find Python ───────────────────────────────────────────────────────────────
 set PYTHON=

@@ -321,7 +321,7 @@ class BridgeManager:
 
     def get_primary_gpu_temp(self):
         for key in self.get_gpu_keys():
-            sensors = self._bridge_data.get(key, [])
+            sensors = self.get_sensor_snapshot(key)   # thread-safe copy via lock
             v = self.sensor_value_in(sensors, ["GPU Core", "Core"], "Temperature")
             if v is not None:
                 return v

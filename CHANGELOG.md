@@ -4,6 +4,53 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.5.9 Beta] - 2026-03-24
+
+### Fixed
+- **`NameError: threading not defined` on startup** — `threading` module was used inside `update_stress_temps` but never imported at the top of `app.py`
+- **`dev.bat` LHMBridge ready-wait loop never worked** — `!READY!` uses delayed expansion but `setlocal enabledelayedexpansion` was missing; the loop always ran all 30 iterations regardless of bridge state
+
+### Changed
+- `dev.bat` and `build_all.bat` version comments bumped to v0.5.9 Beta
+- **Restart race condition** — starting a new stress test while one was running would sometimes stop the bridge immediately after the new test started; fixed with a generation counter: each poll loop captures its generation at birth and only sends `/stress/stop` on exit if it is still the active generation, otherwise it exits silently
+- **`_bridge_stop()` killing new test on restart** — old poll loop's exit path unconditionally called `/stress/stop`; now suppressed when superseded
+- **JSON injection in `_get` error strings** — exception messages containing backslashes or quotes were breaking the `{"error":"..."}` JSON envelope, causing `_bridge_start` to silently return `{}` and the poll loop to start against a bridge that never actually received the start command; error strings are now sanitised before embedding
+- **`_bridge_start` / `_bridge_status` swallowing bad JSON silently** — now return a proper `{"error": ...}` dict instead of `{}` so callers can log the real problem
+- **First-pass rate reading always showed 0.00** — `delta_t` on pass 1 includes startup latency, not real throughput; pass 1 now shows "warming up…" instead of a meaningless rate
+- **`update_stress_temps` loop could die silently** — if the fetch thread raised any uncaught exception `_apply` would never fire and the entire temp loop would stop permanently with no indication; `_apply` is now always scheduled, even on exception, via a finally-style path
+- **Duplicate `update_stress_temps` loops** — `_apply` was the sole rescheduler but could be called concurrently if a second fetch started before the first `_apply` fired; added `_temp_loop_active` guard flag to prevent two loops running simultaneously
+- **`get_primary_gpu_temp()` reading `_bridge_data` without the lock** — direct dict access raced with the background poll thread writing `_bridge_data`; switched to `get_sensor_snapshot()` which acquires `_lock`
+
+### Changed
+- CPU and GPU temps now fetched **concurrently** inside `_fetch` (two daemon threads joined with 2s timeout each) — worst-case wait drops from 2s sequential to ~1s parallel
+- `process_log_queue` interval 250ms → 100ms
+- `update_stress_temps` interval 1000ms → 500ms
+- `_get` query string for `/stress/start` now built with `urllib.parse.urlencode` instead of manual string formatting
+
+---
+
+## [v0.5.8 Beta] - 2026-03-24
+
+### Fixed
+- Stress test start delayed showing temps and logs — `_poll_loop` was waiting 2s before the first status poll; wait moved to bottom of loop so first log line appears immediately
+- `update_stress_temps` was calling `bridge.get_cpu_temp()` / `get_primary_gpu_temp()` on the main thread, stalling the UI every second under bridge load — both calls now run on a daemon thread with result applied back via `root.after(0, ...)`
+
+### Changed
+- `process_log_queue` interval reduced 250ms → 100ms
+- `update_stress_temps` interval reduced 1000ms → 500ms
+
+---
+
+## [v0.5.7 Beta] - 2026-03-24
+
+### Fixed
+- App hang on stress test start — `_bridge_start()` (blocking HTTP call) was running on the Tkinter main thread, freezing the UI for up to 3s on timeout; entire start sequence now runs on a daemon thread
+
+### Changed
+- `_get()` timeout reduced 3s → 2s
+
+---
+
 ## [v0.5.6 Beta] - 2026-03-23
 
 ### Added
