@@ -1,5 +1,5 @@
 // LHMBridge.cs — Sensor bridge with real AMD memory timing support
-// HWInfo Monitor v0.6.0 Beta
+// HWInfo Monitor v0.6.1 Beta
 // Uses LibreHardwareMonitor for all sensors + ZenStates-Core for AMD UMC timings
 // Run as Administrator (required for ring0 access)
 
@@ -22,6 +22,7 @@ class LHMBridge
     static string      _cachedJson      = "{}";
     static string      _cachedCpuTemp   = "null";
     static string      _cachedTimings   = "{}";
+    static string      _cachedMobo      = "{}";
     static readonly object _cacheLock   = new();
 
     static void Main(string[] args)
@@ -136,11 +137,49 @@ class LHMBridge
                             var cpuTempStr = cpuTemp.HasValue
                                 ? cpuTemp.Value.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
                                 : "null";
+
+                            // ── Motherboard sensors ───────────────────────────────────
+                            // Collect SuperIO sub-hardware sensors (temps, voltages, fans)
+                            var moboData = new Dictionary<string, object>();
+                            foreach (var hw in computer.Hardware)
+                            {
+                                if (hw.HardwareType != HardwareType.Motherboard) continue;
+                                moboData["name"] = hw.Name;
+                                var temps_list    = new List<object>();
+                                var voltages_list = new List<object>();
+                                var fans_list     = new List<object>();
+                                foreach (var sub in hw.SubHardware)
+                                {
+                                    foreach (var s in sub.Sensors)
+                                    {
+                                        if (s.Value == null || !s.Value.HasValue) continue;
+                                        var entry = new { name = s.Name, value = (float)s.Value };
+                                        switch (s.SensorType)
+                                        {
+                                            case SensorType.Temperature:
+                                                if (s.Value > 0 && s.Value < 120) temps_list.Add(entry);
+                                                break;
+                                            case SensorType.Voltage:
+                                                if (s.Value > 0 && s.Value < 30) voltages_list.Add(entry);
+                                                break;
+                                            case SensorType.Fan:
+                                                if (s.Value >= 0) fans_list.Add(entry);
+                                                break;
+                                        }
+                                    }
+                                }
+                                moboData["temperatures"] = temps_list;
+                                moboData["voltages"]     = voltages_list;
+                                moboData["fans"]         = fans_list;
+                                break; // only first motherboard
+                            }
+
                             lock (_cacheLock)
                             {
                                 _cachedJson    = json;
                                 _cachedCpuTemp = cpuTempStr;
                                 _cachedTimings = timingsJson;
+                                _cachedMobo    = JsonSerializer.Serialize(moboData);
                             }
                             Console.WriteLine($"Poll {tick}: {result.Count} hw entries, CPU={cpuTempStr}°C");
                         }
@@ -193,6 +232,12 @@ class LHMBridge
                 {
                     string t; lock (_cacheLock) { t = _cachedTimings; }
                     buf = Encoding.UTF8.GetBytes(t);
+                    res.ContentType = "application/json";
+                }
+                else if (path == "/mobo")
+                {
+                    string m; lock (_cacheLock) { m = _cachedMobo; }
+                    buf = Encoding.UTF8.GetBytes(m);
                     res.ContentType = "application/json";
                 }
                 else if (path == "/ready")
@@ -261,17 +306,39 @@ class LHMBridge
     }
 
     // ── CPU temp helpers ──────────────────────────────────────────────────────
+    // AMD Tctl/Tdie can legitimately reach 95°C+ on Zen3/Zen4 under load.
+    // Some boards also report Tctl offset values up to 110°C.
+    // The old 105°C cap was rejecting valid readings on hot AMD systems.
+    // We use >= 1 (not >= 10) to catch cold-boot readings, but still exclude 0.
     static float? GetCpuTempFromHardware(IHardware hw)
     {
+        // Two passes: first try the "good" range, fall back to wider range
+        // This ensures we never return null just because the CPU is very hot
         var temps = hw.Sensors
             .Where(s => s.SensorType == SensorType.Temperature && s.Value.HasValue)
-            .Where(s => s.Value >= 10 && s.Value <= 105)
+            .Where(s => s.Value > 0 && s.Value <= 115)   // > 0 excludes uninit, 115 covers AMD Tctl
             .ToList();
+
+        if (!temps.Any())
+        {
+            // Last resort: any non-zero temp sensor (handles exotic boards)
+            temps = hw.Sensors
+                .Where(s => s.SensorType == SensorType.Temperature
+                         && s.Value.HasValue && s.Value > 0)
+                .ToList();
+        }
+
         if (!temps.Any()) return null;
 
+        // Priority list — most reliable sensor first
+        // Tctl/Tdie is the canonical AMD sensor (includes offset correction in LHM)
+        // CPU Package is the canonical Intel sensor
         string[] priority = {
-            "CPU Package", "Package", "Core Max", "Core Average",
-            "IA Cores Temperature", "CPU CCD", "Tdie", "Tctl/Tdie",
+            "CPU Package", "Package",
+            "Core Max", "Core Average",
+            "IA Cores Temperature",
+            "Tctl/Tdie", "Tdie", "Tctl",
+            "CPU CCD1", "CPU CCD2", "CPU CCD",
             "Core #0", "Core #1", "Core #2", "Core #3"
         };
         foreach (var name in priority)
@@ -281,6 +348,7 @@ class LHMBridge
                 s.Name.StartsWith(name, StringComparison.OrdinalIgnoreCase));
             if (m != null) return m.Value;
         }
+        // Fallback: highest temp (most conservative — better to show hot than N/A)
         return temps.Max(s => s.Value);
     }
 

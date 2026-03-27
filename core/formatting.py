@@ -7,24 +7,24 @@ from .constants import BADGE_HOT, BADGE_LIVE, BADGE_OK, BADGE_WARN, BADGE_OFF
 
 def temp_color(v):
     if v is None:
-        return "#4a5568"
-    return "#ef4444" if v > 80 else ("#f59e0b" if v > 65 else "#22c55e")
+        return "#4a4a4a"
+    return "#ff6b6b" if v > 80 else ("#ffd43b" if v > 65 else "#69db7c")
 
 
 def usage_color(v):
     if v is None:
-        return "#4a5568"
-    return "#ef4444" if v > 85 else ("#f59e0b" if v > 60 else "#3b82f6")
+        return "#4a4a4a"
+    return "#ff6b6b" if v > 85 else ("#ffd43b" if v > 60 else "#cccccc")
 
 
 def health_color(v):
     if v is None:
-        return "#4a5568"
-    return "#ef4444" if v < 50 else ("#f59e0b" if v < 75 else "#22c55e")
+        return "#4a4a4a"
+    return "#ff6b6b" if v < 50 else ("#ffd43b" if v < 75 else "#69db7c")
 
 
 def clock_color(v):
-    return "#4a5568" if v is None else "#a855f7"
+    return "#4a4a4a" if v is None else "#cccccc"
 
 
 def fmt_clock(mhz):
@@ -46,7 +46,6 @@ def fmt_speed(kb):
 
 
 def fmt_temp(v):
-    """Format a temperature value with the degree symbol."""
     if v is None:
         return "N/A"
     return f"{v:.0f}°C"
@@ -67,15 +66,17 @@ def badge_live(online):
 
 
 # ── Layout helpers ────────────────────────────────────────────────────────────
-# All widget builders accept explicit `card_bg` and `border_bg` parameters
-# so the active theme colours are used rather than the module-level defaults
-# (which are evaluated at import time, before the theme is resolved).
 
 def make_card(parent, title, icon, accent, card_bg, border_bg):
-    """Dashboard card: dark bg, 2 px top accent border, header with badge slot."""
+    """MSI One Center style card: clean dark bg, left accent stripe, white title."""
+    # Outer frame — left accent stripe (3px)
     outer = tk.Frame(parent, bg=accent)
-    body = tk.Frame(outer, bg=card_bg, padx=14, pady=10)
-    body.pack(fill="both", expand=True, pady=(2, 0))
+    # Inner body
+    body = tk.Frame(outer, bg=card_bg, padx=16, pady=12)
+    body.pack(fill="both", expand=True, padx=(3, 0), pady=(0, 0))
+
+    # Thin top separator in accent color
+    tk.Frame(body, bg=accent, height=1).pack(fill="x", pady=(0, 10))
 
     hdr = tk.Frame(body, bg=card_bg)
     hdr.pack(fill="x", pady=(0, 8))
@@ -83,7 +84,7 @@ def make_card(parent, title, icon, accent, card_bg, border_bg):
     tk.Label(
         hdr,
         text=f"{icon}  {title}",
-        fg=accent,
+        fg="white",
         bg=card_bg,
         font=("Segoe UI", 10, "bold"),
     ).pack(side="left")
@@ -91,7 +92,7 @@ def make_card(parent, title, icon, accent, card_bg, border_bg):
     badge_lbl = tk.Label(
         hdr,
         text="",
-        fg="#555",
+        fg="#888",
         bg=card_bg,
         font=("Segoe UI", 7, "bold"),
         padx=6,
@@ -108,14 +109,20 @@ def set_badge(badge_lbl, text, colors):
 
 
 def divider(parent, border_bg):
-    tk.Frame(parent, bg=border_bg, height=1).pack(fill="x", pady=5)
+    tk.Frame(parent, bg=border_bg, height=1).pack(fill="x", pady=6)
 
 
 def big_stat(parent, label, val, color, card_bg):
     f = tk.Frame(parent, bg=card_bg)
     f.pack(side="left", expand=True)
-    tk.Label(f, text=label, fg="#4a5568", bg=card_bg, font=("Segoe UI", 8, "bold")).pack()
-    lbl = tk.Label(f, text=val, fg=color, bg=card_bg, font=("Segoe UI", 22, "bold"))
+    tk.Label(
+        f, text=label, fg="#808080", bg=card_bg,
+        font=("Segoe UI", 8, "bold")
+    ).pack()
+    lbl = tk.Label(
+        f, text=val, fg=color, bg=card_bg,
+        font=("Segoe UI", 22, "bold")
+    )
     lbl.pack()
     return lbl
 
@@ -123,14 +130,21 @@ def big_stat(parent, label, val, color, card_bg):
 def small_stat(parent, label, val, color, card_bg):
     f = tk.Frame(parent, bg=card_bg)
     f.pack(side="left", expand=True)
-    tk.Label(f, text=label, fg="#4a5568", bg=card_bg, font=("Segoe UI", 8, "bold")).pack()
-    lbl = tk.Label(f, text=val, fg=color, bg=card_bg, font=("Segoe UI", 13, "bold"))
+    tk.Label(
+        f, text=label, fg="#808080", bg=card_bg,
+        font=("Segoe UI", 8, "bold")
+    ).pack()
+    lbl = tk.Label(
+        f, text=val, fg=color, bg=card_bg,
+        font=("Segoe UI", 13, "bold")
+    )
     lbl.pack()
     return lbl
 
 
 def make_bar(parent, accent, border_bg, height=3):
-    bg = tk.Frame(parent, bg=border_bg, height=height)
+    """Clean progress bar."""
+    bg = tk.Frame(parent, bg="#1a1a1a", height=height)
     bg.pack(fill="x", pady=(6, 0))
     bg.pack_propagate(False)
     fill = tk.Frame(bg, bg=accent, height=height)

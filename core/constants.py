@@ -1,30 +1,34 @@
-APP_VERSION = "v0.6.0 Beta"
+APP_VERSION = "v0.7.1 Beta"
 
-# Theme colors — Dashboard style
-BG = "#0a0e1a"
-CARD = "#111827"
-BORDER = "#1e2a3a"
-GRAPH_BG = "#0d1220"
-COL_CPU = "#3b82f6"
-COL_GPU = "#f97316"
+# ── Black + Red — MSI Dragon inspired ─────────────────────────────────────────
+# Pure black base, red accent, no blue tint
 
-# Accent colors for card top borders
-ACCENT_CPU    = "#3b82f6"
-ACCENT_GPU    = "#f97316"
-ACCENT_RAM    = "#a855f7"
-ACCENT_FAN    = "#06b6d4"
-ACCENT_NET    = "#eab308"
-ACCENT_SYS    = "#ec4899"
-ACCENT_DISK   = "#10b981"
-ACCENT_STRESS = "#ef4444"
+BG       = "#0a0a0a"          # near-black
+CARD     = "#121212"          # card surface — just barely lighter
+BORDER   = "#1e1e1e"          # subtle separator
+GRAPH_BG = "#0e0e0e"          # graph canvas
 
-# Status badge colors
-BADGE_OK   = ("#0d2a1a", "#22c55e")   # (bg, fg)
-BADGE_WARN = ("#2a1a00", "#f59e0b")
-BADGE_HOT  = ("#2a0d0d", "#ef4444")
-BADGE_LIVE = ("#0d1e2a", "#3b82f6")
-BADGE_OFF  = ("#1a1a1a", "#555555")
+# Graph line color
+COL_CPU  = "#e63946"          # MSI red
+COL_GPU  = "#e63946"          # unified red (was blue)
 
-# Runtime constants
-BRIDGE_PORT = 8086
-GRAPH_SECONDS = 60
+# ── Accent colors — unified red ──────────────────────────────────────────────
+ACCENT_CPU    = "#e63946"     # MSI signature red
+ACCENT_GPU    = "#e63946"     # same red
+ACCENT_RAM    = "#e63946"     # same red
+ACCENT_FAN    = "#e63946"     # same red
+ACCENT_NET    = "#e63946"     # same red
+ACCENT_SYS    = "#e63946"     # same red
+ACCENT_DISK   = "#e63946"     # same red
+ACCENT_STRESS = "#e63946"     # same red
+
+# ── Status badge palette ──────────────────────────────────────────────────────
+BADGE_OK   = ("#1a1a1a", "#69db7c")
+BADGE_WARN = ("#1a1a1a", "#ffd43b")
+BADGE_HOT  = ("#2a0a0a", "#e63946")
+BADGE_LIVE = ("#1a1a1a", "#e63946")
+BADGE_OFF  = ("#121212", "#4a4a4a")
+
+# ── Runtime constants ─────────────────────────────────────────────────────────
+BRIDGE_PORT    = 8086
+GRAPH_SECONDS  = 60

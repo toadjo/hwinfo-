@@ -326,3 +326,21 @@ class BridgeManager:
             if v is not None:
                 return v
         return None
+
+    def get_mobo_sensors(self):
+        """Fetch motherboard SuperIO sensors from LHMBridge /mobo endpoint.
+
+        Returns dict with keys:
+            name        - str  : board name e.g. "ROG CROSSHAIR X670E HERO"
+            temperatures - list of {name, value}
+            voltages     - list of {name, value}
+            fans         - list of {name, value}
+        Returns empty dict on failure.
+        """
+        try:
+            r = urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}/mobo", timeout=2)
+            data = json.loads(r.read())
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}

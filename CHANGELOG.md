@@ -4,6 +4,60 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.7.1 Beta] - 2026-03-27
+
+### Added
+- **Splash screen on startup** — borderless centered window displays app name, version badge, developer credits (ToadJo, Manos2400) and Est. 2026; stays visible for 4.5 seconds to cover LHM initialization so users never see a blank/unresponsive window
+- **Animated "Initializing sensors..." status line** on splash — dots cycle every 400ms to signal the app is loading, not frozen
+
+### Fixed
+- **Info panel scroll jumping to top on sensor updates** — root cause was `_set()` calling `row.pack_forget()` / `row.pack()` on every poll cycle; re-packing a widget appends it to the end of the frame instead of its original slot, constantly shifting total content height and dragging the scroll fraction with it; rows now stay packed permanently — missing values display `—` in dim grey instead of disappearing
+- **Info panel scroll `<Configure>` bind replaced with polling** — binding `_iw_sync_scrollregion` to `<Configure>` fired mid-layout before sizes settled, causing unreliable scrollregion updates; now uses a stable 500ms poll loop matching the left sensor panel's approach
+- **GPU block missing red left accent strip** — GPU card was constructed as a plain `tk.Frame(bg=CARD)`, bypassing the 3px accent outer wrapper that `comp_block()` applies to CPU and RAM; fixed to use the same `outer(bg=ACCENT_CPU)` + `inner(padx=(3,0))` pattern
+
+
+
+### Changed
+- **Unified single-window UI** — removed the 3-mode startup popup (Sensors / Stress Test / Both); app now launches directly into a single window with MSI Center-style top tabs: **Monitor** and **Stress Test**
+- **Info panel integrated** — RAM details, Network, System, Fans, Motherboard, and Storage sections are now in a right-side panel within the Monitor tab instead of a separate floating window
+- **Black + Red color scheme** — replaced the blue-grey palette with a pure black base (`#0a0a0a`) and unified red accent (`#e63946`); no more per-component rainbow colors (blue GPU, purple RAM, mint fans, amber network, pink system)
+- **Unified accent system** — all section dots, ring arcs, graph lines, progress bars, and card stripes use the same red accent; data values use light grey (`#cccccc`) instead of per-component colors
+- **Improved text readability** — all label, subtitle, and value font sizes increased; text brightness boosted across the board for better contrast on dark backgrounds; stat strip labels `8pt bold`, info row values `11pt bold`, component subtitles `9pt`
+- **`divider` import renamed** to `fmt_divider` to fix name collision with local widget variables
+- **`BORDER` added to imports** from constants
+- **Window size registry simplified** — single key instead of per-mode keys
+- **`dev.bat` and `build_all.bat`** now clear `HKCU\Software\HWInfoMonitor` registry on startup to prevent stale theme/color overrides from affecting the UI
+
+### Fixed
+- **Registry theme override in admin profile** — `dev.bat` runs elevated, so HKCU points to the admin user's registry hive; stale `UITheme` values (e.g. "Dark Blue") persisted there would override the default theme silently; both bat files now delete the key on startup
+- **`cpu_diag_lbl` yellow artifact** — diagnostic label was always packed even when empty, creating a visible yellow line; now only packed when a warning message exists, hidden otherwise
+- **Alternating row backgrounds** — removed `ROW_A`/`ROW_B` alternation in info panel that created visible striping on some monitors; all rows now use uniform `#111111` background with subtle `#1a1a1a` separator lines
+- **GPU ring showing blue arc** — GPU load ring used stored `acc` variable that could be stale; now explicitly uses `ACCENT_CPU` (red) for all ring draws
+- **`formatting.py` color leaks** — `clock_color()` returned purple `#9775fa`, `usage_color()` returned blue `#4dabf7`; both now return `#cccccc` (light grey)
+- **Progress bar track** too bright — darkened from `#2a2a2a` to `#1a1a1a`
+
+### Removed
+- Startup mode selection popup
+- Separate Info window (Toplevel)
+- Per-mode window size registry keys (`WindowSize_sensors`, `WindowSize_stress`, `WindowSize_both`)
+- 3-mode code paths (sensors-only, stress-only, both)
+
+---
+
+## [v0.6.1 Beta] - 2026-03-24
+
+### Added
+- **Motherboard sensors section** in the Info panel — shows model name, SuperIO temperatures, and voltages from the motherboard's embedded controller (ITE/Nuvoton/Winbond); updated every sensor poll cycle
+- `/mobo` HTTP endpoint in LHMBridge — returns `{name, temperatures[], voltages[], fans[]}` from the Motherboard SubHardware entries
+
+### Fixed
+- **CPU temp always N/A on AMD Ryzen (5800X, etc.)** — `GetCpuTempFromHardware` had a hard cap of 105°C which rejected valid Tctl/Tdie readings on hot systems; cap raised to 115°C to cover AMD Tctl offset values
+- **CPU temp returning 0°C on first poll** — filter changed from `>= 10` to `> 0` so cold-boot readings are accepted; 0 is still excluded (uninitialized sensor)
+- **CPU temp returning null when all sensors out of narrow range** — added two-pass logic: first pass tries `> 0 && <= 115`, second pass tries any non-zero sensor; ensures we never return null due to range rejection alone
+- **Priority list now includes `Tctl`, `CPU CCD1`, `CPU CCD2`** — previously only `Tctl/Tdie` was in the list, missing some AMD board reporting variants
+
+---
+
 ## [v0.6.0 Beta] - 2026-03-24
 
 ### Changed

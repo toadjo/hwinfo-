@@ -1,5 +1,5 @@
 @echo off
-:: dev.bat — HWInfo Monitor v0.5.9 Beta
+:: dev.bat — HWInfo Monitor v0.7.1 Beta
 cd /d "%~dp0"
 
 :: Auto-elevate to admin (required for LHMBridge ring0 access)
@@ -11,6 +11,9 @@ if %errorlevel% neq 0 (
 
 :: Delayed expansion is required for the !READY! variable inside the for loop
 setlocal enabledelayedexpansion
+
+:: ── Clear stale registry settings (prevents theme/color override issues) ─────
+reg delete "HKCU\Software\HWInfoMonitor" /f >nul 2>&1
 
 :: ── Find Python ───────────────────────────────────────────────────────────────
 set PYTHON=

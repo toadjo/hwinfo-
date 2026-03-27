@@ -1,7 +1,10 @@
 @echo off
-:: build_all.bat — HWInfo Monitor v0.5.9 Beta
+:: build_all.bat — HWInfo Monitor v0.7.1 Beta
 title HWInfo Monitor - Build Script
 cd /d "%~dp0"
+
+:: ── Clear stale registry settings ────────────────────────────────────────────
+reg delete "HKCU\Software\HWInfoMonitor" /f >nul 2>&1
 
 :: ── Find Python ───────────────────────────────────────────────────────────────
 set PYTHON=
