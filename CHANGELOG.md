@@ -4,6 +4,35 @@ All notable changes to HWInfo Monitor will be documented here.
 
 ---
 
+## [v0.7.2 Beta] - 2026-03-30
+
+### Added
+- **Linpack DGEMM stress test** — tiled 2048×2048 FP64 matrix multiply (same workload as Intel Linpack/HPL); real data dependencies prevent JIT dead-code elimination, achieving higher thermal output than Combined; AVX2 inner kernel with FMA where supported; OOM fallback to 256×256 scalar
+- **LHMBridge `--debug` flag** — verbose sensor logging in console: admin check on startup, every hardware item found, every sensor with value, exclusion reasons (null / ≤0 / >115°C), SuperIO fallback attempts
+- **`/debug` HTTP endpoint** — JSON snapshot at `http://127.0.0.1:8086/debug` with `is_admin`, all hardware, all sensors with `"ok"` / `"excluded: value <= 0"` notes, and last 50 log lines; available before first poll with `lhm_ready` status
+- **Splash screen real progress bar** — green animated progress bar (0→100%) replaces fixed 4.5s dot animation; bridge starts in background thread so splash closes exactly when sensor data is ready
+- **Stress card hover/press feedback** — cards animate normal `#121212` → hover `#1c1c1c` → press `#252525` with all children updating together
+- **Tab button hover** — subtle `#1a1a1a` background on inactive tab hover; guard prevents re-rendering when clicking already-active tab
+
+### Fixed
+- **Motherboard section hidden when no sensors** — boards with no SuperIO (e.g. Dell, Lenovo locked BIOS) now hide the entire Motherboard section instead of showing "No temperature sensors" / "No voltage sensors" / "No fan sensors" placeholders
+- **LHM admin elevation** — `bridge.py` now uses `ShellExecuteW("runas", ...)` instead of `subprocess.Popen` when parent process is not admin; `Popen` silently inherits non-admin token even when manifest requests `requireAdministrator`
+- **`dev.bat` ready-wait loop never fired** — `curl | findstr` pipeline broke `errorlevel` in cmd delayed expansion; replaced with `curl -o tempfile` + `findstr` on file — reliable exit code every time
+- **LHM diagnostic warning on startup** — app no longer shows "LHMBridge not running" warning on first poll when bridge data hasn't populated yet; warning only appears if `bridge._bridge_data` is non-empty but CPU temp is missing
+- **Ring text scroll artifacts** — value, unit, and label text now baked directly into PIL image alongside arc; eliminates `canvas.create_text` items that lagged behind canvas position during scroll
+- **Left panel scroll artifacts** — removed scrollable canvas from left sensor panel entirely; window opens at 1440×960 to fit all blocks without scroll; `minsize(900, 700)` prevents over-shrinking
+
+### Changed
+- **Left panel no longer scrolls** — replaced `s_canvas` + scrollbar + `_sync_scrollregion` with a plain `tk.Frame`; eliminates all Canvas-in-Canvas scroll artifacts
+- **Default window size** `1440x820` → `1440x960` to accommodate all sensor blocks
+- **Splash progress bar color** changed from red `#e63946` to green `#40c057`
+- **`dev.bat` LHMBridge** now starts in same cmd window (`start /b`) instead of opening a separate console
+- **`dev.bat` ready-wait** extended to 60s with 1s polling; app starts immediately after bridge responds instead of after fixed wait
+- **`_sync_scrollregion` interval** reduced from 250ms to 1000ms to lower spurious `<Configure>` event rate
+
+---
+
+
 ## [v0.7.1 Beta] - 2026-03-27
 
 ### Added

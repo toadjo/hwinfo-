@@ -1,4 +1,6 @@
+# bridge.py — HWInfo Monitor v0.7.2 Beta
 import atexit
+import ctypes
 import json
 import threading
 import os
@@ -9,6 +11,41 @@ import urllib.request
 
 from .constants import BRIDGE_PORT
 from .paths import get_base_path
+
+
+def _is_admin() -> bool:
+    """Return True if the current process has administrator privileges."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _relaunch_as_admin() -> None:
+    """Re-launch the current process elevated via ShellExecute RunAs.
+
+    This triggers the UAC prompt. The original (non-elevated) process exits
+    immediately after spawning the elevated one.
+    """
+    script = os.path.abspath(sys.argv[0])
+    params = " ".join(f'"{a}"' for a in sys.argv[1:])
+    # Use the Python executable that is running us, or the frozen .exe
+    exe = sys.executable
+    ctypes.windll.shell32.ShellExecuteW(
+        None,           # hwnd
+        "runas",        # verb — triggers UAC
+        exe,            # file
+        f'"{script}" {params}',  # params
+        None,           # working dir (inherit)
+        1,              # SW_NORMAL
+    )
+    sys.exit(0)
+
+
+def ensure_admin() -> None:
+    """Call this at app startup. If not admin, re-launch elevated and exit."""
+    if not _is_admin():
+        _relaunch_as_admin()
 
 
 class BridgeManager:
@@ -48,14 +85,46 @@ class BridgeManager:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         return si, creationflags
 
+    def _launch_bridge_elevated(self, path: str) -> bool:
+        """Launch LHMBridge.exe elevated via ShellExecute RunAs.
+
+        Used as fallback when the current process is NOT admin.
+        Because ShellExecuteW spawns an independent process we can't hold a
+        Popen handle — we just wait for /ready instead.
+        Returns True if the bridge becomes reachable within ~15 s.
+        """
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None,
+            "runas",
+            path,
+            f"--port={self.port}",
+            None,
+            0,  # SW_HIDE
+        )
+        # ShellExecuteW returns >32 on success
+        if ret <= 32:
+            return False
+
+        # Wait for /ready
+        for _ in range(30):
+            time.sleep(0.5)
+            try:
+                r = urllib.request.urlopen(
+                    f"http://127.0.0.1:{self.port}/ready", timeout=1
+                )
+                if r.read().decode() == "true":
+                    return True
+            except Exception:
+                pass
+        return False
+
     def start(self):
         """Start LHMBridge if not already running, then wait for sensor data."""
-        # Check if bridge is already running (e.g. started by dev.bat)
+        # ── Already running? (dev.bat pre-launched it) ────────────────────────
         try:
             r = urllib.request.urlopen(
                 f"http://127.0.0.1:{self.port}/ready", timeout=1)
             if r.read().decode() == "true":
-                # Already running — just wait for sensor data
                 for _ in range(20):
                     time.sleep(0.5)
                     try:
@@ -70,63 +139,95 @@ class BridgeManager:
                         pass
                 return True
         except Exception:
-            pass  # Not running yet, start it below
+            pass
 
         path = self._get_bridge_path()
         if not path:
             return False
 
+        # ── Launch bridge ─────────────────────────────────────────────────────
+        # The LHMBridge.exe manifest requests requireAdministrator so Windows
+        # will auto-elevate it via UAC when the parent is not admin.
+        # However, if the parent IS admin we launch normally (inherits perms).
+        # If the parent is NOT admin and ShellExecute fails, we fall back to
+        # a direct Popen (bridge will run without ring0 — sensors may be N/A).
+        launched = False
         try:
-            si, creationflags = self._windows_startup_info()
-            self._bridge_proc = subprocess.Popen(
-                [path, f"--port={self.port}"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                startupinfo=si,
-                creationflags=creationflags,
-            )
-            # Wait for /ready
-            for _ in range(30):
-                time.sleep(0.5)
-                try:
-                    r = urllib.request.urlopen(
-                        f"http://127.0.0.1:{self.port}/ready", timeout=1
-                    )
-                    if r.read().decode() == "true":
-                        break
-                except Exception:
-                    pass
-
-            # Wait for actual sensor data — LHM needs extra time after ready
-            # Try up to 15 seconds (30 x 0.5s) — some machines need longer for ring0
-            for attempt in range(30):
-                time.sleep(0.5)
-                try:
-                    r = urllib.request.urlopen(
-                        f"http://127.0.0.1:{self.port}/sensors", timeout=2
-                    )
-                    data = json.loads(r.read())
-                    # Check if CPU hardware has temperature sensors specifically
-                    has_cpu_temps = any(
-                        "cpu" in k.lower() and
-                        any(s.get("Type","").lower() == "temperature"
-                            for s in v)
-                        for k, v in data.items()
-                    )
-                    if len(data) > 2 and has_cpu_temps:
-                        with self._lock:
-                            self._bridge_data = data
-                        return True
-                    elif len(data) > 2 and attempt >= 20:
-                        # Give up waiting for temps, use what we have
-                        with self._lock:
-                            self._bridge_data = data
-                        return True
-                except Exception:
-                    pass
-            return True
+            if _is_admin():
+                # Parent is admin → child inherits → no UAC prompt needed
+                si, creationflags = self._windows_startup_info()
+                self._bridge_proc = subprocess.Popen(
+                    [path, f"--port={self.port}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=si,
+                    creationflags=creationflags,
+                )
+                launched = True
+            else:
+                # Parent is NOT admin → use ShellExecute RunAs so UAC fires
+                # (manifest requireAdministrator alone isn't enough when parent
+                #  is non-admin and spawns via Popen without ShellExecute)
+                launched = self._launch_bridge_elevated(path)
+                if launched:
+                    # Bridge is already ready — skip the ready-wait below
+                    return self._wait_for_sensor_data()
         except Exception:
-            return False
+            pass
+
+        if not launched:
+            # Last resort: plain Popen (ring0 may fail but app stays alive)
+            try:
+                si, creationflags = self._windows_startup_info()
+                self._bridge_proc = subprocess.Popen(
+                    [path, f"--port={self.port}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=si,
+                    creationflags=creationflags,
+                )
+            except Exception:
+                return False
+
+        # ── Wait for /ready ───────────────────────────────────────────────────
+        for _ in range(30):
+            time.sleep(0.5)
+            try:
+                r = urllib.request.urlopen(
+                    f"http://127.0.0.1:{self.port}/ready", timeout=1
+                )
+                if r.read().decode() == "true":
+                    break
+            except Exception:
+                pass
+
+        return self._wait_for_sensor_data()
+
+    def _wait_for_sensor_data(self) -> bool:
+        """Poll /sensors until we have CPU temp data or timeout (15 s)."""
+        for attempt in range(30):
+            time.sleep(0.5)
+            try:
+                r = urllib.request.urlopen(
+                    f"http://127.0.0.1:{self.port}/sensors", timeout=2
+                )
+                data = json.loads(r.read())
+                has_cpu_temps = any(
+                    "cpu" in k.lower() and
+                    any(s.get("Type", "").lower() == "temperature" for s in v)
+                    for k, v in data.items()
+                )
+                if len(data) > 2 and has_cpu_temps:
+                    with self._lock:
+                        self._bridge_data = data
+                    return True
+                elif len(data) > 2 and attempt >= 20:
+                    with self._lock:
+                        self._bridge_data = data
+                    return True
+            except Exception:
+                pass
+        return True
 
     def stop(self):
         if self._bridge_proc:
@@ -194,7 +295,6 @@ class BridgeManager:
                 if val is not None:
                     results.append((s["Name"], val))
 
-        # Fallback: psutil if LHM returned nothing
         if not results:
             try:
                 import psutil
@@ -232,10 +332,7 @@ class BridgeManager:
         return None
 
     def get_cpu_temp(self):
-        """Fetch CPU temp from LHMBridge /cpu-temp endpoint.
-        The C# side uses HardwareType enums — no string guessing needed.
-        Falls back to sensor scan if endpoint unavailable.
-        """
+        """Fetch CPU temp from LHMBridge /cpu-temp endpoint."""
         try:
             r = urllib.request.urlopen(
                 f"http://127.0.0.1:{self.port}/cpu-temp", timeout=1)
@@ -244,7 +341,6 @@ class BridgeManager:
                 return float(val)
         except Exception:
             pass
-        # Fallback for older LHMBridge versions without /cpu-temp
         for key, sensors in self.get_data_snapshot().items():
             if "cpu" not in key.lower():
                 continue
@@ -259,8 +355,7 @@ class BridgeManager:
         return None
 
     def get_memory_timings(self):
-        """Fetch real AMD memory timings from LHMBridge /timings endpoint.
-        Returns dict with tCL, tRCDRD, tRP, tRAS, tRFC, CR or empty dict."""
+        """Fetch real AMD memory timings from LHMBridge /timings endpoint."""
         try:
             r = urllib.request.urlopen(
                 f"http://127.0.0.1:{self.port}/timings", timeout=1)
@@ -270,14 +365,9 @@ class BridgeManager:
             return {}
 
     def diagnose_na(self, sensor_type, hw_hint=""):
-        """Return a short reason string for why a sensor shows N/A.
-
-        sensor_type: "cpu_temp" | "gpu_temp" | "disk" | "fan"
-        hw_hint: optional hardware key substring for context
-        """
+        """Return a short reason string for why a sensor shows N/A."""
         data = self.get_data_snapshot()
 
-        # Check if bridge is even running
         if not data:
             try:
                 urllib.request.urlopen(
@@ -287,16 +377,13 @@ class BridgeManager:
                 return "LHMBridge not running or not accessible"
 
         if sensor_type == "cpu_temp":
-            # Check if CPU hardware key exists
             cpu_keys = [k for k in data if "cpu" in k.lower()]
             if not cpu_keys:
                 return "No CPU hardware detected by LHM (try running as Administrator)"
-            # Check if it has temperature sensors
             for key in cpu_keys:
                 temps = [s for s in data[key] if s["Type"].lower() == "temperature"]
                 if not temps:
                     return f"CPU found ({key}) but no temperature sensors — driver conflict or insufficient permissions"
-                # Check if all temps are out of range
                 valid = [s for s in temps if s["Value"] and 10 <= s["Value"] <= 105]
                 if not valid:
                     return f"CPU temps found but all out of range: {[s['Value'] for s in temps]}"
@@ -321,22 +408,14 @@ class BridgeManager:
 
     def get_primary_gpu_temp(self):
         for key in self.get_gpu_keys():
-            sensors = self.get_sensor_snapshot(key)   # thread-safe copy via lock
+            sensors = self.get_sensor_snapshot(key)
             v = self.sensor_value_in(sensors, ["GPU Core", "Core"], "Temperature")
             if v is not None:
                 return v
         return None
 
     def get_mobo_sensors(self):
-        """Fetch motherboard SuperIO sensors from LHMBridge /mobo endpoint.
-
-        Returns dict with keys:
-            name        - str  : board name e.g. "ROG CROSSHAIR X670E HERO"
-            temperatures - list of {name, value}
-            voltages     - list of {name, value}
-            fans         - list of {name, value}
-        Returns empty dict on failure.
-        """
+        """Fetch motherboard SuperIO sensors from LHMBridge /mobo endpoint."""
         try:
             r = urllib.request.urlopen(
                 f"http://127.0.0.1:{self.port}/mobo", timeout=2)

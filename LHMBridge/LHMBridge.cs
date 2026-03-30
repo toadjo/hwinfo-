@@ -1,7 +1,8 @@
 // LHMBridge.cs — Sensor bridge with real AMD memory timing support
-// HWInfo Monitor v0.6.1 Beta
+// HWInfo Monitor v0.7.2 Beta
 // Uses LibreHardwareMonitor for all sensors + ZenStates-Core for AMD UMC timings
 // Run as Administrator (required for ring0 access)
+// Pass --debug to enable verbose sensor diagnostic logging
 
 using System;
 using System.Collections.Generic;
@@ -18,25 +19,72 @@ using LibreHardwareMonitor.Hardware;
 class LHMBridge
 {
     static Computer?   computer;
-    static bool        ready        = false;
+    static bool        ready            = false;
+    static bool        debugMode        = false;
     static string      _cachedJson      = "{}";
     static string      _cachedCpuTemp   = "null";
     static string      _cachedTimings   = "{}";
     static string      _cachedMobo      = "{}";
+    static string      _cachedDebug     = "{}";
     static readonly object _cacheLock   = new();
+
+    // ── Debug log — circular buffer, thread-safe ──────────────────────────────
+    static readonly List<string> _debugLog = new();
+    static void DbgLog(string msg)
+    {
+        if (!debugMode) return;
+        var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
+        Console.WriteLine(line);
+        lock (_debugLog)
+        {
+            _debugLog.Add(line);
+            if (_debugLog.Count > 1000) _debugLog.RemoveAt(0);
+        }
+    }
+    static List<string> GetDebugLogTail(int n)
+    {
+        lock (_debugLog)
+        {
+            int start = Math.Max(0, _debugLog.Count - n);
+            return _debugLog.Skip(start).ToList();
+        }
+    }
 
     static void Main(string[] args)
     {
         int port = 8086;
         foreach (var a in args)
+        {
             if (a.StartsWith("--port=") && int.TryParse(a[7..], out int p))
                 port = p;
+            if (a == "--debug")
+                debugMode = true;
+        }
+
+        if (debugMode)
+            Console.WriteLine("=== LHMBridge DEBUG MODE ===");
+
+        // ── Check admin rights ────────────────────────────────────────────────
+        bool isAdmin = false;
+        try
+        {
+            var identity  = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            isAdmin = principal.IsInRole(
+                System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch { }
+        DbgLog($"Running as Administrator: {isAdmin}");
+        if (!isAdmin)
+            Console.Error.WriteLine("WARNING: Not running as Administrator — ring0 sensors may be unavailable.");
 
         // ── Init LHM ──────────────────────────────────────────────────────────
         var initThread = new Thread(() =>
         {
+            DbgLog("initThread started.");
             try
             {
+                DbgLog("Opening Computer (full config)...");
                 computer = new Computer
                 {
                     IsCpuEnabled         = true,
@@ -47,14 +95,23 @@ class LHMBridge
                     IsNetworkEnabled     = false,
                 };
                 computer.Open();
+                DbgLog($"computer.Open() succeeded. Hardware count: {computer.Hardware.Count}");
+                foreach (var hw in computer.Hardware)
+                {
+                    DbgLog($"  HW: [{hw.HardwareType}] {hw.Name}");
+                    foreach (var sub in hw.SubHardware)
+                        DbgLog($"    SubHW: [{sub.HardwareType}] {sub.Name}");
+                }
                 ready = true;
                 Console.WriteLine("LHM initialized.");
             }
             catch (Exception ex)
             {
+                DbgLog($"Full init FAILED: {ex.GetType().Name}: {ex.Message}");
                 Console.Error.WriteLine($"LHM init error: {ex.Message}");
                 try
                 {
+                    DbgLog("Retrying with minimal config (no storage)...");
                     computer = new Computer
                     {
                         IsCpuEnabled = true, IsGpuEnabled = true,
@@ -62,11 +119,15 @@ class LHMBridge
                         IsStorageEnabled = false, IsNetworkEnabled = false,
                     };
                     computer.Open();
+                    DbgLog($"Minimal init succeeded. Hardware count: {computer.Hardware.Count}");
+                    foreach (var hw in computer.Hardware)
+                        DbgLog($"  HW: [{hw.HardwareType}] {hw.Name}");
                     ready = true;
                     Console.WriteLine("LHM initialized (minimal).");
                 }
                 catch (Exception ex2)
                 {
+                    DbgLog($"Minimal init ALSO FAILED: {ex2.GetType().Name}: {ex2.Message}");
                     Console.Error.WriteLine($"LHM minimal init error: {ex2.Message}");
                 }
             }
@@ -93,31 +154,70 @@ class LHMBridge
                             {
                                 foreach (var hw in computer.Hardware)
                                 {
-                                    try { hw.Update(); } catch { }
+                                    try { hw.Update(); } catch (Exception ex) {
+                                        DbgLog($"hw.Update() FAILED [{hw.HardwareType}] {hw.Name}: {ex.Message}");
+                                    }
                                     foreach (var sub in hw.SubHardware)
-                                        try { sub.Update(); } catch { }
+                                        try { sub.Update(); } catch (Exception ex) {
+                                            DbgLog($"sub.Update() FAILED {sub.Name}: {ex.Message}");
+                                        }
                                     CollectSensors(hw, result);
 
                                     if (hw.HardwareType == HardwareType.Cpu)
+                                    {
                                         cpuTemp = GetCpuTempFromHardware(hw);
+                                        if (debugMode && tick == 0)
+                                        {
+                                            DbgLog($"CPU [{hw.Name}] — {hw.Sensors.Length} sensors:");
+                                            foreach (var s in hw.Sensors)
+                                                DbgLog($"  [{s.SensorType}] \"{s.Name}\" = {(s.Value.HasValue ? s.Value.Value.ToString("F1") : "null")}");
+                                            DbgLog(cpuTemp == null
+                                                ? "  >> GetCpuTempFromHardware returned NULL"
+                                                : $"  >> Selected CPU temp: {cpuTemp:F1}°C");
+                                        }
+                                    }
+                                    else if (debugMode && tick == 0)
+                                    {
+                                        DbgLog($"[{hw.HardwareType}] {hw.Name} — {hw.Sensors.Length} sensors");
+                                        foreach (var s in hw.Sensors.Where(s => s.Value.HasValue))
+                                            DbgLog($"  [{s.SensorType}] \"{s.Name}\" = {s.Value!.Value:F1}");
+                                        foreach (var sub in hw.SubHardware)
+                                        {
+                                            DbgLog($"  SubHW [{sub.HardwareType}] {sub.Name} — {sub.Sensors.Length} sensors");
+                                            foreach (var s in sub.Sensors.Where(s => s.Value.HasValue))
+                                                DbgLog($"    [{s.SensorType}] \"{s.Name}\" = {s.Value!.Value:F1}");
+                                        }
+                                    }
                                 }
 
                                 // Fallback: SuperIO for CPU temp
                                 if (cpuTemp == null)
                                 {
+                                    DbgLog("CPU temp null — trying SuperIO fallback...");
                                     foreach (var hw in computer.Hardware)
                                     {
                                         if (hw.HardwareType != HardwareType.Motherboard) continue;
                                         foreach (var sub in hw.SubHardware)
                                         {
                                             var t = GetCpuTempFromSuperIO(sub);
-                                            if (t != null) { cpuTemp = t; break; }
+                                            if (t != null)
+                                            {
+                                                cpuTemp = t;
+                                                DbgLog($"  SuperIO [{sub.Name}] found CPU temp: {t:F1}°C");
+                                                break;
+                                            }
+                                            else DbgLog($"  SuperIO [{sub.Name}] — no CPU temp");
                                         }
                                         if (cpuTemp != null) break;
                                     }
+                                    if (cpuTemp == null)
+                                        DbgLog("  SuperIO fallback also null — CPU temp will be N/A");
                                 }
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                DbgLog($"updateThread EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                            }
                         });
                         updateThread.IsBackground = true;
                         updateThread.Start();
@@ -174,12 +274,25 @@ class LHMBridge
                                 break; // only first motherboard
                             }
 
+                            // ── Build /debug snapshot ─────────────────────────────────
+                            var debugData = new Dictionary<string, object>
+                            {
+                                ["is_admin"]   = isAdmin,
+                                ["debug_mode"] = debugMode,
+                                ["tick"]       = tick,
+                                ["hw_count"]   = computer.Hardware.Count,
+                                ["cpu_temp"]   = cpuTemp.HasValue ? (object)cpuTemp.Value : "null",
+                                ["hardware"]   = BuildDebugHardwareReport(computer),
+                                ["log_tail"]   = GetDebugLogTail(50),
+                            };
+
                             lock (_cacheLock)
                             {
                                 _cachedJson    = json;
                                 _cachedCpuTemp = cpuTempStr;
                                 _cachedTimings = timingsJson;
                                 _cachedMobo    = JsonSerializer.Serialize(moboData);
+                                _cachedDebug   = JsonSerializer.Serialize(debugData);
                             }
                             Console.WriteLine($"Poll {tick}: {result.Count} hw entries, CPU={cpuTempStr}°C");
                         }
@@ -245,6 +358,28 @@ class LHMBridge
                     buf = Encoding.UTF8.GetBytes(ready ? "true" : "false");
                     res.ContentType = "text/plain";
                 }
+                else if (path == "/debug")
+                {
+                    string dbg;
+                    lock (_cacheLock) { dbg = _cachedDebug; }
+                    if (dbg == "{}")
+                    {
+                        var preDebug = new Dictionary<string, object>
+                        {
+                            ["is_admin"]   = isAdmin,
+                            ["debug_mode"] = debugMode,
+                            ["lhm_ready"]  = ready,
+                            ["tick"]       = -1,
+                            ["log_tail"]   = GetDebugLogTail(50),
+                            ["note"]       = ready
+                                ? "LHM ready but first poll not done yet — wait 2s and retry"
+                                : "LHM still initializing — retry in a few seconds",
+                        };
+                        dbg = JsonSerializer.Serialize(preDebug);
+                    }
+                    buf = Encoding.UTF8.GetBytes(dbg);
+                    res.ContentType = "application/json";
+                }
                 else if (path.StartsWith("/ram/"))
                 {
                     string action = path[5..];
@@ -303,6 +438,60 @@ class LHMBridge
             }
             catch { }
         }
+    }
+
+    // ── Debug helpers ─────────────────────────────────────────────────────────
+    static List<object> BuildDebugHardwareReport(Computer comp)
+    {
+        var report = new List<object>();
+        try
+        {
+            foreach (var hw in comp.Hardware)
+            {
+                var sensors = hw.Sensors.Select(s => new
+                {
+                    name  = s.Name,
+                    type  = s.SensorType.ToString(),
+                    value = s.Value.HasValue ? (float?)s.Value.Value : null,
+                    note  = GetSensorNote(s),
+                }).ToList();
+
+                var subList = hw.SubHardware.Select(sub => new
+                {
+                    name     = sub.Name,
+                    type     = sub.HardwareType.ToString(),
+                    sensors  = sub.Sensors.Select(s => new
+                    {
+                        name  = s.Name,
+                        type  = s.SensorType.ToString(),
+                        value = s.Value.HasValue ? (float?)s.Value.Value : null,
+                        note  = GetSensorNote(s),
+                    }).ToList(),
+                }).ToList();
+
+                report.Add(new
+                {
+                    name         = hw.Name,
+                    type         = hw.HardwareType.ToString(),
+                    sensor_count = hw.Sensors.Length,
+                    sensors,
+                    sub_hardware = subList,
+                });
+            }
+        }
+        catch (Exception ex) { report.Add(new { error = ex.Message }); }
+        return report;
+    }
+
+    static string GetSensorNote(ISensor s)
+    {
+        if (!s.Value.HasValue)  return "no value (null)";
+        if (s.SensorType == SensorType.Temperature)
+        {
+            if (s.Value <= 0)   return "excluded: value <= 0 (uninitialized)";
+            if (s.Value > 115)  return "excluded: value > 115°C (out of range)";
+        }
+        return "ok";
     }
 
     // ── CPU temp helpers ──────────────────────────────────────────────────────
@@ -969,21 +1158,141 @@ static class StressBurner
                 break;
 
             // ── Test 3: Combined — absolute max package power ─────────────────
-            // Every thread runs FMA burn AND pulls from a large memory buffer
-            // each outer iteration. This keeps all FP execution units pegged
-            // while also forcing real DRAM traffic on every core simultaneously.
-            // Splitting threads half/half is less effective because the FMA-only
-            // half runs cold memory — here every thread stresses both at once.
             case "combined":
-            {
-                // Each thread gets its own 64MB buffer (above L3 on most CPUs)
-                // so memory traffic is real DRAM, not cache hits.
                 AvxFmaMemBurn(idx, token);
                 break;
-            }
+
+            // ── Test 4: Linpack DGEMM ─────────────────────────────────────────
+            // Tiled 2048×2048 FP64 matrix multiply (DGEMM) — same workload as
+            // Intel Linpack / HPL benchmark. Real data dependencies mean the CPU
+            // cannot speculate or eliminate work, forcing true max FP throughput.
+            // AVX2 inner kernel: 4 doubles × 8 FMA chains = 32 FP64 FMAs/iter.
+            // Hotter than pure FMA burn because every iteration reads 3 matrices
+            // → cache pressure + FP execution ports pegged simultaneously.
+            case "linpack":
+                LinpackDgemm(idx, token);
+                break;
 
             default:
                 goto case "cpu_multi";
+        }
+    }
+
+    // ── Linpack-style DGEMM ───────────────────────────────────────────────────
+    // Tiled matrix multiply C += A × B, FP64, AVX2 inner kernel.
+    // Matrix size 2048×2048 = 32MB per matrix × 3 = 96MB total per thread.
+    // Tile size 64 fits 3×64×64×8 = 98KB in L2 (most CPUs have ≥256KB L2).
+    // Each outer iteration: 2 × N³ FP64 FMAs → at N=2048: 17 billion FMAs.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static unsafe void LinpackDgemm(int idx, CancellationToken token)
+    {
+        const int N    = 2048;   // matrix dimension
+        const int TILE = 64;     // L2-friendly tile size
+
+        // Allocate 3 matrices — each 2048×2048 FP64 = 32MB
+        double[]? A_arr, B_arr, C_arr;
+        try
+        {
+            A_arr = new double[N * N];
+            B_arr = new double[N * N];
+            C_arr = new double[N * N];
+        }
+        catch (OutOfMemoryException)
+        {
+            // Fallback: half size if OOM
+            goto scalar_fallback;
+        }
+
+        // Fill with non-trivial values so JIT can't optimize away
+        for (int i = 0; i < N * N; i++)
+        {
+            A_arr[i] = 1.0 + (i * 0.000001) + (idx * 0.0001);
+            B_arr[i] = 0.5 + ((N * N - i) * 0.0000005);
+        }
+
+        // ── Tiled DGEMM loop ──────────────────────────────────────────────────
+        // Tile over i,k,j — this order keeps B-tile hot in L2 across i-loop
+        // Inner AVX2 kernel: accumulates 4 doubles per instruction
+        fixed (double* A = A_arr, B = B_arr, C = C_arr)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                // Reset C (simulates fresh DGEMM call, avoids inf accumulation)
+                new Span<double>(C, N * N).Fill(0.0);
+
+                for (int ii = 0; ii < N && !token.IsCancellationRequested; ii += TILE)
+                for (int kk = 0; kk < N; kk += TILE)
+                {
+                    int iMax = Math.Min(ii + TILE, N);
+                    int kMax = Math.Min(kk + TILE, N);
+
+                    for (int jj = 0; jj < N; jj += TILE)
+                    {
+                        int jMax = Math.Min(jj + TILE, N);
+
+                        // ── Inner kernel: C[i,j] += A[i,k] * B[k,j] ─────────
+                        for (int i = ii; i < iMax; i++)
+                        {
+                            double* Ci = C + i * N;
+                            double* Ai = A + i * N;
+
+                            for (int k = kk; k < kMax; k++)
+                            {
+                                double aik = Ai[k];
+                                double* Bk = B + k * N;
+
+                                if (Avx2.IsSupported)
+                                {
+                                    // AVX2: process 4 doubles per instruction
+                                    var vaik = Vector256.Create(aik);
+                                    int j = jj;
+                                    for (; j <= jMax - 4; j += 4)
+                                    {
+                                        var vc  = Avx.LoadVector256(Ci + j);
+                                        var vb  = Avx.LoadVector256(Bk + j);
+                                        var res = Fma.IsSupported
+                                            ? Fma.MultiplyAdd(vaik, vb, vc)
+                                            : Avx.Add(vc, Avx.Multiply(vaik, vb));
+                                        Avx.Store(Ci + j, res);
+                                    }
+                                    // Scalar tail
+                                    for (; j < jMax; j++)
+                                        Ci[j] += aik * Bk[j];
+                                }
+                                else
+                                {
+                                    for (int j = jj; j < jMax; j++)
+                                        Ci[j] += aik * Bk[j];
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Count FMAs: 2 × N³ per full DGEMM pass
+                Interlocked.Add(ref _totalIters, 2L * N * N * N);
+
+                // Sink one result element to prevent dead-code elimination
+                Sink(C[N / 2 * N + N / 2]);
+            }
+        }
+        return;
+
+        scalar_fallback:
+        // Tiny 256×256 scalar fallback if OOM
+        const int Ns = 256;
+        double[] sa = new double[Ns * Ns];
+        double[] sb = new double[Ns * Ns];
+        double[] sc = new double[Ns * Ns];
+        for (int i = 0; i < Ns * Ns; i++) { sa[i] = 1.0 + i * 0.001; sb[i] = 0.5 + i * 0.0005; }
+        while (!token.IsCancellationRequested)
+        {
+            for (int i = 0; i < Ns; i++)
+            for (int k = 0; k < Ns; k++)
+            for (int j = 0; j < Ns; j++)
+                sc[i * Ns + j] += sa[i * Ns + k] * sb[k * Ns + j];
+            Interlocked.Add(ref _totalIters, 2L * Ns * Ns * Ns);
+            Sink(sc[Ns / 2 * Ns + Ns / 2]);
         }
     }
 }

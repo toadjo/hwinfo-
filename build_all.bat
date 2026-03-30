@@ -1,5 +1,5 @@
 @echo off
-:: build_all.bat — HWInfo Monitor v0.7.1 Beta
+:: build_all.bat — HWInfo Monitor v0.7.2 Beta
 title HWInfo Monitor - Build Script
 cd /d "%~dp0"
 
@@ -59,13 +59,13 @@ echo [1/5] Installing Python dependencies...
 %PYTHON% -m pip install -r requirements-build.txt --quiet
 echo Done.
 
-:: ── Build LHMBridge ──────────────────────────────────────────────────────────
+:: ── Build LHMBridge (Release — no --debug flag) ───────────────────────────────
 where dotnet >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: .NET SDK not found. Download from https://aka.ms/dotnet/download
     pause & exit /b 1
 )
-echo [2/5] Building LHMBridge...
+echo [2/5] Building LHMBridge (Release)...
 mkdir dist\LHMBridge
 dotnet publish "%~dp0LHMBridge\LHMBridge.csproj" -c Release -r win-x64 --self-contained true -o "%~dp0dist\LHMBridge" --nologo -v quiet
 if errorlevel 1 (

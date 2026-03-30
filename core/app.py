@@ -1,4 +1,4 @@
-# app.py — HWInfo Monitor v0.7.0 Beta  (unified tabbed UI)
+# app.py — HWInfo Monitor v0.7.2 Beta  (unified tabbed UI)
 import collections
 import ctypes
 import queue
@@ -52,7 +52,8 @@ from .system_info import load_static_system_info
 def main():
     log_queue = queue.Queue()
     bridge = BridgeManager()
-    bridge.start()
+    # bridge.start() is now called inside the splash screen thread
+    # so the progress bar reflects real LHM init progress
     stress_manager = StressManager(log_queue)
 
     # ── Font system ───────────────────────────────────────────────────────────
@@ -1014,14 +1015,14 @@ def main():
     RS = 150
 
     # ══════════════════════════════════════════════════════════════════════════
-    # SPLASH SCREEN
+    # SPLASH SCREEN — bridge starts in background thread, progress bar is real
     # ══════════════════════════════════════════════════════════════════════════
     _splash = tk.Tk()
     _splash.overrideredirect(True)
     _splash.configure(bg="#0a0a0a")
     _splash.resizable(False, False)
 
-    _SW, _SH = 420, 220
+    _SW, _SH = 420, 240
     _splash.geometry(
         f"{_SW}x{_SH}+"
         f"{(_splash.winfo_screenwidth()  - _SW) // 2}+"
@@ -1065,29 +1066,181 @@ def main():
     tk.Label(_cred_row, text="   ·   Est. 2026", fg="#333333", bg="#0a0a0a",
              font=("Segoe UI", 8)).pack(side="left")
 
-    # Initializing status line
-    tk.Frame(_body, bg="#0a0a0a", height=10).pack()
-    _status_lbl = tk.Label(_body, text="Initializing sensors   ", fg="#333333",
+    # Status label
+    tk.Frame(_body, bg="#0a0a0a", height=8).pack()
+    _status_lbl = tk.Label(_body, text="Starting...", fg="#555555",
                            bg="#0a0a0a", font=("Segoe UI", 8))
     _status_lbl.pack()
 
-    _dot_states = ["Initializing sensors   ", "Initializing sensors.  ",
-                   "Initializing sensors.. ", "Initializing sensors..."]
-    _dot_i = [0]
-    def _animate_dots():
+    # ── Progress bar ──────────────────────────────────────────────────────────
+    tk.Frame(_body, bg="#0a0a0a", height=6).pack()
+    _bar_bg = tk.Frame(_body, bg="#1a1a1a", height=4)
+    _bar_bg.pack(fill="x", padx=32)
+    _bar_bg.update_idletasks()
+    _bar_fill = tk.Frame(_bar_bg, bg="#40c057", height=4, width=0)
+    _bar_fill.place(x=0, y=0, relheight=1.0, width=0)
+
+    _progress    = [0.0]
+    _bar_width   = [_SW - 64]
+
+    def _on_bar_configure(e):
+        _bar_width[0] = max(e.width, 1)
+    _bar_bg.bind("<Configure>", _on_bar_configure)
+
+    def _set_progress(pct: float, msg: str = ""):
+        """Schedule a progress update on the tkinter main thread."""
+        _progress[0] = max(_progress[0], min(float(pct), 1.0))
+        _p = _progress[0]
+        _m = msg
+        def _apply():
+            try:
+                w = int(_bar_width[0] * _p)
+                _bar_fill.place(x=0, y=0, relheight=1.0, width=max(w, 0))
+                if _m:
+                    _status_lbl.config(text=_m)
+            except Exception:
+                pass
         try:
-            _dot_i[0] = (_dot_i[0] + 1) % len(_dot_states)
-            _status_lbl.config(text=_dot_states[_dot_i[0]])
-            _splash.after(400, _animate_dots)
+            _splash.after(0, _apply)
         except Exception:
             pass
-    _splash.after(400, _animate_dots)
 
     # Thin red bottom accent
     tk.Frame(_splash, bg="#e63946", height=2).pack(fill="x", side="bottom")
 
-    _splash.after(4500, _splash.destroy)
+    # ── Bridge start runs in a background thread ──────────────────────────────
+    # The splash closes itself when the bridge has data (or times out).
+    # Progress milestones:
+    #   5%  → process launched
+    #  20%  → process started, waiting for /ready
+    #  50%  → /ready received (LHM initialized ring0 drivers)
+    #  90%  → first sensor data arrived
+    # 100%  → done, splash closes after 400ms
+    import threading as _threading
+
+    def _do_wait_sensors():
+        """Poll /sensors until CPU temp data arrives (max 10s). Updates bridge data."""
+        for attempt in range(40):
+            time.sleep(0.25)
+            pct = 0.50 + (attempt / 40) * 0.48
+            _set_progress(pct)
+            try:
+                r = urllib.request.urlopen(
+                    f"http://127.0.0.1:{bridge.port}/sensors", timeout=2)
+                data = json.loads(r.read())
+                has_cpu = any(
+                    "cpu" in k.lower() and
+                    any(s.get("Type", "").lower() == "temperature" for s in v)
+                    for k, v in data.items()
+                )
+                if has_cpu:
+                    # Got real CPU temp data — close immediately
+                    with bridge._lock:
+                        bridge._bridge_data = data
+                    return
+                elif len(data) > 2 and attempt >= 28:
+                    # Timed out waiting for CPU temps — use whatever we have
+                    with bridge._lock:
+                        bridge._bridge_data = data
+                    return
+            except Exception:
+                pass
+
+    def _finish_splash():
+        _set_progress(1.0, "Ready")
+        try:
+            _splash.after(400, _splash.destroy)
+        except Exception:
+            pass
+
+    def _bridge_start_thread():
+        try:
+            import ctypes as _ct
+            import subprocess as _sp
+
+            def _is_admin_local():
+                try:
+                    return bool(_ct.windll.shell32.IsUserAnAdmin())
+                except Exception:
+                    return False
+
+            # ── Phase 1: check if bridge is already up (dev.bat pre-launches it) ─
+            # dev.bat waits for /ready before starting Python, so in 99% of cases
+            # the bridge is already running. Just do a quick multi-attempt check
+            # (a few retries in case of tiny timing gap) then move on fast.
+            _set_progress(0.05, "Initializing sensors...")
+            for i in range(8):             # 8 × 0.25s = 2s max quick check
+                time.sleep(0.25)
+                _set_progress(0.05 + (i / 8) * 0.45)
+                try:
+                    r = urllib.request.urlopen(
+                        f"http://127.0.0.1:{bridge.port}/ready", timeout=1)
+                    if r.read().decode() == "true":
+                        _set_progress(0.50, "Loading sensor data...")
+                        _do_wait_sensors()
+                        _finish_splash()
+                        return
+                except Exception:
+                    pass
+
+            # ── Phase 1b: bridge not up yet — poll for up to 20s more ────────
+            # Fallback for when app is launched without dev.bat or bridge is slow.
+            for i in range(80):            # 80 × 0.25s = 20s
+                time.sleep(0.25)
+                _set_progress(0.05 + (i / 80) * 0.45)
+                try:
+                    r = urllib.request.urlopen(
+                        f"http://127.0.0.1:{bridge.port}/ready", timeout=1)
+                    if r.read().decode() == "true":
+                        _set_progress(0.50, "Loading sensor data...")
+                        _do_wait_sensors()
+                        _finish_splash()
+                        return
+                except Exception:
+                    pass
+
+            # ── Phase 2: bridge not started by dev.bat — launch it ourselves ─
+            _set_progress(0.20, "Launching sensor bridge...")
+            path = bridge._get_bridge_path()
+            if path:
+                if _is_admin_local():
+                    si, cf = bridge._windows_startup_info()
+                    try:
+                        bridge._bridge_proc = _sp.Popen(
+                            [path, f"--port={bridge.port}"],
+                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                            startupinfo=si, creationflags=cf,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    bridge._launch_bridge_elevated(path)
+
+                # Wait for /ready after self-launch (another 15s)
+                for i in range(60):
+                    time.sleep(0.25)
+                    _set_progress(0.20 + (i / 60) * 0.30)
+                    try:
+                        r = urllib.request.urlopen(
+                            f"http://127.0.0.1:{bridge.port}/ready", timeout=1)
+                        if r.read().decode() == "true":
+                            break
+                    except Exception:
+                        pass
+
+            _set_progress(0.50, "Loading sensor data...")
+            _do_wait_sensors()
+            _finish_splash()
+
+        except Exception:
+            _finish_splash()
+
+    _t = _threading.Thread(target=_bridge_start_thread, daemon=True)
+    _t.start()
     _splash.mainloop()
+    # Wait for bridge thread to finish — ensures bridge._bridge_data is populated
+    # before the main window's first update_sensors() call runs.
+    _t.join(timeout=30)
 
     # ══════════════════════════════════════════════════════════════════════════
     # MAIN WINDOW — single window, MSI Center style with top tabs
@@ -1096,7 +1249,8 @@ def main():
     root.title(f"HWInfo Monitor {APP_VERSION}")
     root.configure(bg=BG)
     root.resizable(True, True)
-    root.geometry(_load_window_size() or "1440x820")
+    root.minsize(900, 700)
+    root.geometry(_load_window_size() or "1440x960")
 
     # ── MSI-style header bar ──────────────────────────────────────────────────
     # Top accent line
@@ -1122,6 +1276,8 @@ def main():
     _active_tab = [None]
 
     def _switch_main_tab(name):
+        if _active_tab[0] == name:
+            return
         for n, page in _main_tab_pages.items():
             page.pack_forget()
         _main_tab_pages[name].pack(fill="both", expand=True)
@@ -1141,8 +1297,14 @@ def main():
                         activebackground="#1a1a1a", activeforeground="white",
                         command=lambda n=name: _switch_main_tab(n))
         btn.pack(side="left")
-        btn.bind("<Enter>", lambda e, b=btn, n=name: b.config(fg="white") if n != _active_tab[0] else None)
-        btn.bind("<Leave>", lambda e, b=btn, n=name: b.config(fg="#888888") if n != _active_tab[0] else None)
+        def _tab_enter(e, b=btn, n=name):
+            if n != _active_tab[0]:
+                b.config(fg="white", bg="#1a1a1a")
+        def _tab_leave(e, b=btn, n=name):
+            if n != _active_tab[0]:
+                b.config(fg="#888888", bg="#0f0f0f")
+        btn.bind("<Enter>", _tab_enter)
+        btn.bind("<Leave>", _tab_leave)
         _main_tab_btns[name] = btn
 
     _make_main_tab_btn("monitor", "Monitor")
@@ -1195,33 +1357,9 @@ def main():
     left_pane = tk.Frame(monitor_split, bg=BG)
     left_pane.pack(side="left", fill="both", expand=True)
 
-    s_canvas = tk.Canvas(left_pane, bg=BG, highlightthickness=0)
-    s_sb = tk.Scrollbar(left_pane, orient="vertical", command=s_canvas.yview)
-    s_canvas.configure(yscrollcommand=s_sb.set)
-    s_sb.pack(side="right", fill="y")
-    s_canvas.pack(side="left", fill="both", expand=True)
-
-    sf = tk.Frame(s_canvas, bg=BG)
-    sf_window = s_canvas.create_window((0, 0), window=sf, anchor="nw")
-    _last_bbox = [None]
-
-    def _sync_scrollregion():
-        bbox = s_canvas.bbox("all")
-        if bbox and bbox != _last_bbox[0]:
-            _last_bbox[0] = bbox
-            pos = s_canvas.yview()[0]
-            s_canvas.configure(scrollregion=bbox)
-            if pos > 0:
-                s_canvas.yview_moveto(pos)
-        s_canvas.after(250, _sync_scrollregion)
-
-    sf.bind("<Configure>", lambda e: None)
-    s_canvas.bind("<Configure>", lambda e: s_canvas.itemconfig(sf_window, width=e.width))
-    left_pane.bind("<MouseWheel>", lambda e: s_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-    s_canvas.bind("<MouseWheel>", lambda e: s_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-    sf.bind("<MouseWheel>", lambda e: s_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-    s_canvas.after(500, _sync_scrollregion)
-
+    # No scroll on left panel — window auto-sizes to fit all blocks
+    sf = tk.Frame(left_pane, bg=BG)
+    sf.pack(fill="both", expand=True)
     sf.columnconfigure(0, weight=1)
     sf.rowconfigure(0, weight=1)
 
@@ -1348,9 +1486,8 @@ def main():
     cpu_graph_canvas = tk.Canvas(cpu_graph_col, bg=GRAPH_BG, height=85,
                                  highlightthickness=1, highlightbackground=BORDER)
     cpu_graph_canvas.pack(fill="x", pady=(0, 8))
-    cpu_graph_canvas.bind("<Configure>",
-                          lambda e: draw_single_graph(cpu_graph_canvas,
-                                                      graph_cpu_temps, COL_CPU, 85))
+    # No <Configure> bind — graph redraws every 2s via update_sensors
+    # Binding <Configure> caused redraw on every scroll event (artifact)
 
     # ── GPU Block ─────────────────────────────────────────────────────────────
     gpu_block = tk.Frame(left, bg=BG)
@@ -1531,16 +1668,23 @@ def main():
     fan_frame = tk.Frame(right, bg=BG)
     fan_frame.pack(fill="x", padx=8)
 
-    # Motherboard sensors
-    list_header("🖥", "Motherboard")
-    mobo_name_lbl = tk.Label(right, text="", fg="#b0b0b0", bg=BG,
+    # Motherboard sensors — entire section hidden when board has no sensors
+    mobo_section = tk.Frame(right, bg=BG)
+    mobo_section.pack(fill="x")
+    _mobo_hdr_f = tk.Frame(mobo_section, bg=BG)
+    _mobo_hdr_f.pack(fill="x", padx=16, pady=(20, 6))
+    tk.Label(_mobo_hdr_f, text="●", fg=ACCENT_CPU, bg=BG,
+             font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
+    tk.Label(_mobo_hdr_f, text="Motherboard", fg="white", bg=BG,
+             font=("Segoe UI", 12, "bold")).pack(side="left")
+    mobo_name_lbl = tk.Label(mobo_section, text="", fg="#b0b0b0", bg=BG,
                              font=("Segoe UI", 9), anchor="w")
     mobo_name_lbl.pack(fill="x", padx=20, pady=(0, 4))
-    mobo_temps_frame    = tk.Frame(right, bg=BG)
+    mobo_temps_frame    = tk.Frame(mobo_section, bg=BG)
     mobo_temps_frame.pack(fill="x", padx=8)
-    mobo_voltages_frame = tk.Frame(right, bg=BG)
+    mobo_voltages_frame = tk.Frame(mobo_section, bg=BG)
     mobo_voltages_frame.pack(fill="x", padx=8)
-    mobo_fans_frame     = tk.Frame(right, bg=BG)
+    mobo_fans_frame     = tk.Frame(mobo_section, bg=BG)
     mobo_fans_frame.pack(fill="x", padx=8)
 
     # Storage
@@ -1621,16 +1765,24 @@ def main():
         draw_ring(cpu_ring_temp, cpu_temp,  "TEMP", temp_color(cpu_temp), BLOCK_BG,
                   max_val=105, unit="°C")
         if cpu_temp is None:
-            reason = bridge.diagnose_na("cpu_temp")
-            if "permissions" in reason.lower() or "driver" in reason.lower():
-                msg = "⚠  Run as Administrator to enable temperature sensors"
-            elif "not running" in reason.lower():
-                msg = "⚠  LHMBridge not running — restart the app"
+            # Only show warning if bridge has had time to populate data
+            # (empty dict on first poll = still loading, not a real error)
+            if bridge.get_data_snapshot():
+                reason = bridge.diagnose_na("cpu_temp")
+                if "permissions" in reason.lower() or "driver" in reason.lower():
+                    msg = "⚠  Run as Administrator to enable temperature sensors"
+                elif "not running" in reason.lower():
+                    msg = "⚠  LHMBridge not running — restart the app"
+                else:
+                    msg = f"⚠  {reason}"
+                cpu_diag_lbl.config(text=msg)
+                if not cpu_diag_lbl.winfo_ismapped():
+                    cpu_diag_lbl.pack(anchor="center", pady=(4, 0))
             else:
-                msg = f"⚠  {reason}"
-            cpu_diag_lbl.config(text=msg)
-            if not cpu_diag_lbl.winfo_ismapped():
-                cpu_diag_lbl.pack(anchor="center", pady=(4, 0))
+                # Still loading — hide warning silently
+                cpu_diag_lbl.config(text="")
+                if cpu_diag_lbl.winfo_ismapped():
+                    cpu_diag_lbl.pack_forget()
         else:
             cpu_diag_lbl.config(text="")
             if cpu_diag_lbl.winfo_ismapped():
@@ -1859,56 +2011,67 @@ def main():
         mobo = bridge.get_mobo_sensors()
         if mobo:
             board_name = mobo.get("name", "")
-            mobo_name_lbl.config(text=board_name)
+            temps     = mobo.get("temperatures", [])
+            voltages  = mobo.get("voltages", [])
+            fans      = mobo.get("fans", [])
+            has_any   = any([temps, voltages, fans])
 
-            def _rebuild_mobo_frame(frame, entries, unit, accent, empty_msg):
-                for w in frame.winfo_children():
-                    w.destroy()
-                valid = [e for e in entries
-                         if e.get("value") is not None]
-                if not valid:
-                    tk.Label(frame, text=empty_msg, fg="#a0a0a0",
-                             bg=BG, font=("Segoe UI", 9), padx=12
-                             ).pack(anchor="w", pady=2)
-                    return
-                for fi, e in enumerate(valid):
-                    row = tk.Frame(frame, bg=ROW_BG)
-                    row.pack(fill="x")
-                    tk.Frame(row, bg="#1a1a1a", height=1).pack(side="bottom", fill="x")
-                    val_str = f"{e['value']:.1f}{unit}"
-                    if unit == "°C":
-                        col = temp_color(e["value"])
-                    else:
-                        col = "#cccccc"
-                    tk.Label(row, text=val_str, fg=col, bg=ROW_BG,
-                             font=("Segoe UI", 10, "bold"),
-                             width=10, anchor="e").pack(side="right", padx=(0, 16))
-                    name = e["name"]
-                    display = name if len(name) <= 22 else name[:21] + "…"
-                    tk.Label(row, text=display, fg="#b0b0b0", bg=ROW_BG,
-                             font=("Segoe UI", 9), anchor="w").pack(
-                                 side="left", padx=(12, 0), pady=5)
+            if has_any:
+                mobo_section.pack(fill="x")
+                mobo_name_lbl.config(text=board_name)
 
-            _rebuild_mobo_frame(
-                mobo_temps_frame,
-                mobo.get("temperatures", []),
-                "°C", "#cccccc",
-                "No temperature sensors",
-            )
-            _rebuild_mobo_frame(
-                mobo_voltages_frame,
-                mobo.get("voltages", []),
-                " V", "#cccccc",
-                "No voltage sensors",
-            )
-            _rebuild_mobo_frame(
-                mobo_fans_frame,
-                mobo.get("fans", []),
-                " RPM", "#cccccc",
-                "No fan sensors",
-            )
+                def _rebuild_mobo_frame(frame, entries, unit, accent, empty_msg):
+                    for w in frame.winfo_children():
+                        w.destroy()
+                    valid = [e for e in entries
+                             if e.get("value") is not None]
+                    if not valid:
+                        tk.Label(frame, text=empty_msg, fg="#a0a0a0",
+                                 bg=BG, font=("Segoe UI", 9), padx=12
+                                 ).pack(anchor="w", pady=2)
+                        return
+                    for fi, e in enumerate(valid):
+                        row = tk.Frame(frame, bg=ROW_BG)
+                        row.pack(fill="x")
+                        tk.Frame(row, bg="#1a1a1a", height=1).pack(side="bottom", fill="x")
+                        val_str = f"{e['value']:.1f}{unit}"
+                        if unit == "°C":
+                            col = temp_color(e["value"])
+                        else:
+                            col = "#cccccc"
+                        tk.Label(row, text=val_str, fg=col, bg=ROW_BG,
+                                 font=("Segoe UI", 10, "bold"),
+                                 width=10, anchor="e").pack(side="right", padx=(0, 16))
+                        name = e["name"]
+                        display = name if len(name) <= 22 else name[:21] + "…"
+                        tk.Label(row, text=display, fg="#b0b0b0", bg=ROW_BG,
+                                 font=("Segoe UI", 9), anchor="w").pack(
+                                     side="left", padx=(12, 0), pady=5)
+
+                _rebuild_mobo_frame(
+                    mobo_temps_frame,
+                    temps,
+                    "°C", "#cccccc",
+                    "No temperature sensors",
+                )
+                _rebuild_mobo_frame(
+                    mobo_voltages_frame,
+                    voltages,
+                    " V", "#cccccc",
+                    "No voltage sensors",
+                )
+                _rebuild_mobo_frame(
+                    mobo_fans_frame,
+                    fans,
+                    " RPM", "#cccccc",
+                    "No fan sensors",
+                )
+            else:
+                # Board detected but exposes no sensors (e.g. Dell/Lenovo locked BIOS)
+                # Hide the entire section — no point showing an empty card
+                mobo_section.pack_forget()
         else:
-            mobo_name_lbl.config(text="Not available (run as Administrator)")
+            mobo_section.pack_forget()
 
         # Storage
         storage_keys = sorted([k for k in bridge.data if "storage" in k.lower()])
@@ -2012,7 +2175,8 @@ def main():
 
         root.after(2000, update_sensors)
 
-    update_sensors()
+    # Bridge thread is done before main window opens — run first poll immediately
+    root.after(100, update_sensors)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STRESS TEST TAB — single scrollable page, no sub-tabs
@@ -2137,14 +2301,16 @@ def main():
     _ncores = _mp.cpu_count()
 
     ALL_TESTS = [
-        {"section": "CPU Stress Tests", "title": "CPU Single Core", "badge": "1T",   "accent": "#e63946", "cmd": "cpu_single",
+        {"section": "CPU Stress Tests", "title": "CPU Single Core", "badge": "1T",      "accent": "#e63946", "cmd": "cpu_single",
          "desc": f"1 thread · AVX2 FMA · max boost clock + single-core heat"},
-        {"section": "CPU Stress Tests", "title": "CPU Multi Core",  "badge": "AVX2", "accent": "#e63946", "cmd": "cpu_multi",
+        {"section": "CPU Stress Tests", "title": "CPU Multi Core",  "badge": "AVX2",    "accent": "#e63946", "cmd": "cpu_multi",
          "desc": f"All {_ncores} threads · AVX2 FMA · max all-core load + thermals"},
-        {"section": "CPU Stress Tests", "title": "Memory / IMC",    "badge": "RAM",  "accent": "#e63946", "cmd": "memory",
+        {"section": "CPU Stress Tests", "title": "Memory / IMC",    "badge": "RAM",     "accent": "#e63946", "cmd": "memory",
          "desc": "256MB/thread · sequential + stride · saturates DDR5 IMC"},
-        {"section": "CPU Stress Tests", "title": "CPU + Memory",    "badge": "ALL",  "accent": "#e63946", "cmd": "combined",
+        {"section": "CPU Stress Tests", "title": "CPU + Memory",    "badge": "ALL",     "accent": "#e63946", "cmd": "combined",
          "desc": f"All {_ncores} threads · FMA + memory flood · max package power"},
+        {"section": "CPU Stress Tests", "title": "Linpack DGEMM",   "badge": "LINPACK", "accent": "#ff4500", "cmd": "linpack",
+         "desc": f"All {_ncores} threads · 2048×2048 FP64 matrix multiply · hotter than Combined"},
     ]
 
     from collections import OrderedDict
@@ -2190,6 +2356,42 @@ def main():
             card.bind("<Button-1>", on_click)
             for w in card.winfo_children():
                 w.bind("<Button-1>", on_click)
+
+            # Hover / press feedback
+            _acc = t["accent"]
+            def _enter(e, c=card, a=_acc):
+                c.config(bg="#1c1c1c")
+                for ch in c.winfo_children():
+                    try:
+                        if ch.cget("bg") in ("#121212", "#0f0f0f"):
+                            ch.config(bg="#1c1c1c")
+                    except Exception: pass
+            def _leave(e, c=card, a=_acc):
+                c.config(bg="#121212")
+                for ch in c.winfo_children():
+                    try:
+                        if ch.cget("bg") == "#1c1c1c":
+                            ch.config(bg="#121212")
+                    except Exception: pass
+            def _press(e, c=card):
+                c.config(bg="#252525")
+                for ch in c.winfo_children():
+                    try:
+                        if ch.cget("bg") in ("#121212","#1c1c1c"):
+                            ch.config(bg="#252525")
+                    except Exception: pass
+            def _release(e, c=card, a=_acc):
+                _enter(e, c, a)
+
+            card.bind("<Enter>",           _enter)
+            card.bind("<Leave>",           _leave)
+            card.bind("<ButtonPress-1>",   _press)
+            card.bind("<ButtonRelease-1>", _release)
+            for w in card.winfo_children():
+                w.bind("<Enter>",           lambda e, c=card, a=_acc: _enter(e, c, a))
+                w.bind("<Leave>",           lambda e, c=card, a=_acc: _leave(e, c, a))
+                w.bind("<ButtonPress-1>",   lambda e, c=card: _press(e, c))
+                w.bind("<ButtonRelease-1>", lambda e, c=card, a=_acc: _release(e, c, a))
         grid_row += 1
 
     # ── RAM Stability Test — same card style ──────────────────────────────────
