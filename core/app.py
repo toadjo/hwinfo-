@@ -1022,7 +1022,7 @@ def main():
     _splash.configure(bg="#0a0a0a")
     _splash.resizable(False, False)
 
-    _SW, _SH = 460, 280
+    _SW, _SH = 420, 240
     _splash.geometry(
         f"{_SW}x{_SH}+"
         f"{(_splash.winfo_screenwidth()  - _SW) // 2}+"
@@ -1037,88 +1037,37 @@ def main():
     _body = tk.Frame(_splash, bg="#0a0a0a")
     _body.pack(fill="both", expand=True, padx=2, pady=(0, 2))
 
-    # ── Draw frog logo in PIL ─────────────────────────────────────────────────
-    def _make_logo(size=72):
-        from PIL import Image as _Img, ImageDraw as _IDraw
-        S = size
-        img = _Img.new("RGB", (S, S), (10, 10, 10))
-        d = _IDraw.Draw(img)
-        R = (230, 57, 70)
-        DK = (13, 13, 13)
-        BG = (20, 20, 20)
-        # Square head
-        pad = int(S * 0.08)
-        r = int(S * 0.14)
-        d.rounded_rectangle([pad, pad + int(S*0.12), S-pad, S-pad], radius=r, fill=BG, outline=R, width=2)
-        # Top red stripe
-        d.rounded_rectangle([pad, pad + int(S*0.12), S-pad, pad + int(S*0.12) + int(S*0.055)], radius=r, fill=R)
-        # Left eye
-        ex1, ey = int(S*0.27), int(S*0.42)
-        d.ellipse([ex1-int(S*0.16), ey-int(S*0.16), ex1+int(S*0.16), ey+int(S*0.16)], fill=DK, outline=R, width=2)
-        d.ellipse([ex1-int(S*0.10), ey-int(S*0.10), ex1+int(S*0.10), ey+int(S*0.10)], fill=R)
-        d.ellipse([ex1-int(S*0.055), ey-int(S*0.055), ex1+int(S*0.055), ey+int(S*0.055)], fill=(10,10,10))
-        d.ellipse([ex1-int(S*0.09), ey-int(S*0.09), ex1-int(S*0.055), ey-int(S*0.055)], fill=(255,255,255,90))
-        # Right eye
-        ex2 = int(S*0.73)
-        d.ellipse([ex2-int(S*0.16), ey-int(S*0.16), ex2+int(S*0.16), ey+int(S*0.16)], fill=DK, outline=R, width=2)
-        d.ellipse([ex2-int(S*0.10), ey-int(S*0.10), ex2+int(S*0.10), ey+int(S*0.10)], fill=R)
-        d.ellipse([ex2-int(S*0.055), ey-int(S*0.055), ex2+int(S*0.055), ey+int(S*0.055)], fill=(10,10,10))
-        d.ellipse([ex2-int(S*0.09), ey-int(S*0.09), ex2-int(S*0.055), ey-int(S*0.055)], fill=(255,255,255,90))
-        # Nostrils
-        nx = int(S*0.42); ny = int(S*0.63)
-        d.rounded_rectangle([nx, ny, nx+int(S*0.07), ny+int(S*0.05)], radius=2, fill=DK)
-        d.rounded_rectangle([nx+int(S*0.16), ny, nx+int(S*0.23), ny+int(S*0.05)], radius=2, fill=DK)
-        # Smile
-        for i in range(40):
-            t = i / 39
-            x = int(S*0.27 + t*(S*0.73-S*0.27))
-            y = int(S*0.72 + 0.12*S * (4*t*(1-t)))
-            x2 = int(S*0.27 + (t+0.025)*(S*0.73-S*0.27))
-            y2 = int(S*0.72 + 0.12*S * (4*(t+0.025)*(1-(t+0.025))))
-            d.line([x, y, x2, y2], fill=R, width=2)
-        # Bottom red bar
-        d.rectangle([pad, S-pad-int(S*0.045), S-pad, S-pad], fill=R)
-        return img
+    # App name row
+    _name_row = tk.Frame(_body, bg="#0a0a0a")
+    _name_row.pack(expand=True)
+    tk.Label(_name_row, text="HWInfo", fg="white",   bg="#0a0a0a",
+             font=("Segoe UI", 28, "bold")).pack(side="left")
+    tk.Label(_name_row, text=" Monitor", fg="#e63946", bg="#0a0a0a",
+             font=("Segoe UI", 28, "bold")).pack(side="left")
 
-    _logo_img = _make_logo(72)
-    _logo_photo = ImageTk.PhotoImage(_logo_img)
+    # Version badge
+    tk.Label(_body, text=APP_VERSION, fg="#555555", bg="#0a0a0a",
+             font=("Segoe UI", 9)).pack()
 
-    # ── Layout: logo left, text right ────────────────────────────────────────
-    _top_row = tk.Frame(_body, bg="#0a0a0a")
-    _top_row.pack(expand=True, fill="x", padx=20, pady=(14, 0))
+    # Thin divider
+    tk.Frame(_body, bg="#1e1e1e", height=1).pack(fill="x", padx=32, pady=(14, 10))
 
-    tk.Label(_top_row, image=_logo_photo, bg="#0a0a0a").pack(side="left", padx=(0, 18))
-
-    _text_col = tk.Frame(_top_row, bg="#0a0a0a")
-    _text_col.pack(side="left", anchor="w")
-
-    _name_row = tk.Frame(_text_col, bg="#0a0a0a")
-    _name_row.pack(anchor="w")
-    tk.Label(_name_row, text="Toad's ", fg="#e63946", bg="#0a0a0a",
-             font=("Segoe UI", 22, "bold")).pack(side="left")
-    tk.Label(_name_row, text="HWinfo", fg="white", bg="#0a0a0a",
-             font=("Segoe UI", 22, "bold")).pack(side="left")
-
-    tk.Label(_text_col, text=APP_VERSION, fg="#555555", bg="#0a0a0a",
-             font=("Segoe UI", 9)).pack(anchor="w")
-
-    tk.Frame(_text_col, bg="#0a0a0a", height=6).pack()
-
-    _cred_row = tk.Frame(_text_col, bg="#0a0a0a")
-    _cred_row.pack(anchor="w")
-    tk.Label(_cred_row, text="by ", fg="#444444", bg="#0a0a0a",
+    # Credits row
+    _cred_row = tk.Frame(_body, bg="#0a0a0a")
+    _cred_row.pack()
+    tk.Label(_cred_row, text="Developers: ", fg="#555555", bg="#0a0a0a",
              font=("Segoe UI", 8)).pack(side="left")
     tk.Label(_cred_row, text="ToadJo", fg="#e63946", bg="#0a0a0a",
              font=("Segoe UI", 8, "bold")).pack(side="left")
-    tk.Label(_cred_row, text=" & ", fg="#444444", bg="#0a0a0a",
+    tk.Label(_cred_row, text=",", fg="#555555", bg="#0a0a0a",
              font=("Segoe UI", 8)).pack(side="left")
-    tk.Label(_cred_row, text="Manos2400", fg="#e63946", bg="#0a0a0a",
+    tk.Label(_cred_row, text=" Manos2400", fg="#e63946", bg="#0a0a0a",
              font=("Segoe UI", 8, "bold")).pack(side="left")
-
-    # Divider
-    tk.Frame(_body, bg="#1e1e1e", height=1).pack(fill="x", padx=20, pady=(14, 8))
+    tk.Label(_cred_row, text="   ·   Est. 2026", fg="#333333", bg="#0a0a0a",
+             font=("Segoe UI", 8)).pack(side="left")
 
     # Status label
+    tk.Frame(_body, bg="#0a0a0a", height=8).pack()
     _status_lbl = tk.Label(_body, text="Starting...", fg="#555555",
                            bg="#0a0a0a", font=("Segoe UI", 8))
     _status_lbl.pack()
@@ -1126,7 +1075,7 @@ def main():
     # ── Progress bar ──────────────────────────────────────────────────────────
     tk.Frame(_body, bg="#0a0a0a", height=6).pack()
     _bar_bg = tk.Frame(_body, bg="#1a1a1a", height=4)
-    _bar_bg.pack(fill="x", padx=20)
+    _bar_bg.pack(fill="x", padx=32)
     _bar_bg.update_idletasks()
     _bar_fill = tk.Frame(_bar_bg, bg="#40c057", height=4, width=0)
     _bar_fill.place(x=0, y=0, relheight=1.0, width=0)
@@ -1387,6 +1336,57 @@ def main():
     tk.Frame(root, bg=BORDER, height=1).pack(fill="x")
 
     # ── Main content area ─────────────────────────────────────────────────────
+    # ── Update notification banner (hidden until update found) ──────────────
+    _update_bar = tk.Frame(root, bg="#1a3a1a", pady=4)
+    _update_lbl = tk.Label(_update_bar, text="", fg="#40c057", bg="#1a3a1a",
+                           font=("Segoe UI", 9), cursor="hand2")
+    _update_lbl.pack(side="left", padx=12)
+    tk.Label(_update_bar, text="✕", fg="#40c057", bg="#1a3a1a",
+             font=("Segoe UI", 9), cursor="hand2").pack(side="right", padx=8)
+    _update_bar.pack_slaves()  # don't show yet
+
+    def _check_for_updates():
+        import threading as _ut
+        import json as _uj
+        import urllib.request as _ur
+        def _fetch():
+            try:
+                url = "https://raw.githubusercontent.com/toadjo/hwinfo-/main/version.json"
+                r = _ur.urlopen(url, timeout=5)
+                data = _uj.loads(r.read())
+                remote = data.get("version", "")
+                local  = APP_VERSION.replace("v","").replace(" Beta","").strip()
+                remote_clean = remote.replace("v","").replace(" Beta","").strip()
+                def _parse(v):
+                    try: return tuple(int(x) for x in v.split("."))
+                    except: return (0,)
+                if _parse(remote_clean) > _parse(local):
+                    dl_url = data.get("download_url", "https://github.com/toadjo/hwinfo-/releases/latest")
+                    log    = data.get("changelog", "")
+                    def _show():
+                        try:
+                            msg = f"  ↑  New version v{remote_clean} available"
+                            if log: msg += f"  —  {log}"
+                            msg += "   Click to download"
+                            _update_lbl.config(text=msg)
+                            _update_bar.pack(fill="x", before=content_area)
+                            def _open(e=None):
+                                import webbrowser
+                                webbrowser.open(dl_url)
+                            _update_lbl.bind("<Button-1>", _open)
+                            # ✕ to dismiss
+                            for w in _update_bar.winfo_children():
+                                if w.cget("text") == "✕":
+                                    w.bind("<Button-1>", lambda e: _update_bar.pack_forget())
+                        except Exception:
+                            pass
+                    root.after(0, _show)
+            except Exception:
+                pass
+        _ut.Thread(target=_fetch, daemon=True).start()
+
+    root.after(3000, _check_for_updates)  # check 3s after startup
+
     content_area = tk.Frame(root, bg=BG)
     content_area.pack(fill="both", expand=True)
 

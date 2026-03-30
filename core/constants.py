@@ -32,3 +32,6 @@ BADGE_OFF  = ("#121212", "#4a4a4a")
 # ── Runtime constants ─────────────────────────────────────────────────────────
 BRIDGE_PORT    = 8086
 GRAPH_SECONDS  = 60
+
+# ── Update checker ────────────────────────────────────────────────────────────
+VERSION_CHECK_URL = "https://raw.githubusercontent.com/toadjo/hwinfo-/main/version.json"

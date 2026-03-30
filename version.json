@@ -1,0 +1,5 @@
+{
+  "version": "0.7.2",
+  "download_url": "https://github.com/toadjo/hwinfo-/releases/latest",
+  "changelog": "Splash screen logo, progress bar, Linpack stress test, debug mode, faster startup"
+}
