@@ -4,6 +4,27 @@ All notable changes to HardwareToad will be documented here.
 
 ---
 
+
+## [v0.7.3 Beta] - 2026-03-31
+
+### Added
+- **Robot toad logo on splash screen** — base64-embedded image in `app.py`, no external file dependency; splash height increased from 240 → 300 to properly fit logo
+- **Multi-threaded RAM tester** — parallelized memory stress execution for improved coverage and throughput
+
+### Changed
+- **12-chain register-correct FMA burn** — reduced from 24 chains to eliminate register spills; improves execution efficiency and maintains peak thermal load
+- **Brutal 4-pass memory burn** — upgraded to 512MB buffers with randomized access patterns and full stride coverage for maximum DRAM stress
+- **Thread scheduling priorities** — stress threads set to `BelowNormal`, HTTP server + polling threads set to `AboveNormal`, and 1 CPU core reserved to maintain UI/system responsiveness
+- **HTTP timeout increased** — `stress_manager.py` timeout raised from 2s → 4s for improved reliability under heavy load
+- **Branding update** — all references from “HWInfo Monitor” → **HardwareToad** across `README.md` and `CHANGELOG.md`
+
+### Assets
+- **Robot toad mascot assets added**
+  - `logo.svg` — primary scalable asset (recommended for UI usage, stored in assets folder)
+  - `logo_256.png` — 256px raster version suitable for application icon
+  - Dark theme styling with red accent to match UI
+
+
 ## [v0.7.2 Beta] - 2026-03-30
 
 ### Added
