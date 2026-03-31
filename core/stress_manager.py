@@ -1,4 +1,4 @@
-# stress_manager.py — HWInfo Monitor v0.5.10 Beta
+# stress_manager.py — HWInfo Monitor v0.5.9 Beta
 import queue
 import threading
 import time
@@ -19,10 +19,6 @@ class StressManager:
         self._log_routing = {}
         self._stop_events  = {}
         self._poll_threads = {}
-        # Generation counter per cmd_prefix — incremented on every new start.
-        # Each poll loop captures its own generation at birth; if it no longer
-        # matches the current value the loop knows it has been superseded and
-        # must NOT send /stress/stop (a newer run is already live).
         self._generations  = {}
 
     # cmd key → LHMBridge mode string
@@ -31,22 +27,21 @@ class StressManager:
         "cpu_multi":  "cpu_multi",
         "memory":     "memory",
         "combined":   "combined",
+        "linpack":    "linpack",
         "gpu_core":     "fma",
         "gpu_vram":     "vram",
         "gpu_combined": "combined",
     }
 
-    def _get(self, path, timeout=4):
+    def _get(self, path, timeout=2):
         try:
             with urllib.request.urlopen(f"{self._base}{path}", timeout=timeout) as r:
                 return r.read().decode()
         except Exception as e:
-            # Sanitise so the error string is always safe to embed in JSON.
             safe = str(e).replace('\\', '\\\\').replace('"', '\\"')
             return f'{{"error":"{safe}"}}'
 
     def _bridge_start(self, mode):
-        # Use urlencode — handles any special chars in mode name safely.
         qs  = urllib.parse.urlencode({"mode": mode})
         raw = self._get(f"/stress/start?{qs}")
         try:
@@ -79,8 +74,6 @@ class StressManager:
             delta_i = iters - last_iters
             delta_t = now   - last_time
 
-            # Skip rate on pass 1 — delta_t includes startup latency, not
-            # real throughput, so it always reads near-zero and is misleading.
             if passes == 1:
                 rate_str = "warming up…"
             else:
@@ -97,9 +90,6 @@ class StressManager:
 
             stop_ev.wait(2.0)
 
-        # Only send /stress/stop if we are still the active generation.
-        # If start() was called again while this loop was running, our
-        # generation is stale — stopping the bridge would kill the new test.
         if self._generations.get(cmd_prefix) == my_gen:
             self._bridge_stop()
             log_cb("■ Stopped.")
@@ -110,13 +100,11 @@ class StressManager:
         self._log_routing[cmd_prefix] = card_id
 
         def start(log_cb):
-            # Cancel the previous run for this slot, if any.
             existing = self._stop_events.get(cmd_prefix)
             if existing and not existing.is_set():
                 existing.set()
 
-            # Bump generation so the dying poll loop won't stop the bridge
-            # after the new test has already started.
+            # Fix: Ensure the line below is complete
             new_gen = self._generations.get(cmd_prefix, 0) + 1
             self._generations[cmd_prefix] = new_gen
 

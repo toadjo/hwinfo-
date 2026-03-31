@@ -1,5 +1,5 @@
 // LHMBridge.cs — Sensor bridge with real AMD memory timing support
-// HWInfo Monitor v0.7.3 Beta
+// HWInfo Monitor v0.7.4 Beta
 // Uses LibreHardwareMonitor for all sensors + ZenStates-Core for AMD UMC timings
 // Run as Administrator (required for ring0 access)
 // Pass --debug to enable verbose sensor diagnostic logging
@@ -304,7 +304,6 @@ class LHMBridge
             }
         });
         pollThread.IsBackground = true;
-        pollThread.Priority = ThreadPriority.AboveNormal; // Must beat stress threads for sensor updates
         pollThread.Start();
 
         // ── HTTP server ───────────────────────────────────────────────────────
@@ -317,11 +316,6 @@ class LHMBridge
             Environment.Exit(1);
         }
         Console.WriteLine($"LHMBridge running on http://127.0.0.1:{port}/");
-
-        // Boost main thread priority — this is the HTTP listener.
-        // Under stress load, BelowNormal burn threads yield to this,
-        // ensuring the Python UI always gets prompt HTTP responses.
-        try { Thread.CurrentThread.Priority = ThreadPriority.AboveNormal; } catch { }
 
         while (true)
         {
@@ -783,32 +777,19 @@ static class StressBurner
             Interlocked.Exchange(ref _totalIters, 0);
 
             int cores = Environment.ProcessorCount;
-            // Reserve 1 logical core for the HTTP server + sensor poll + OS.
-            // This is the #1 reason the app becomes unresponsive under load:
-            // if every core is pinned by a Highest-priority stress thread,
-            // the Normal-priority HTTP listener never gets scheduled.
-            // On single-core (very rare), still use 1 stress thread.
-            int stressCores = mode == "cpu_single" ? 1 : Math.Max(1, cores - 1);
-            _threadCount = stressCores;
+            _threadCount = mode == "cpu_single" ? 1 : cores;
 
             var token = _cts.Token;
             for (int i = 0; i < _threadCount; i++)
             {
                 int idx = i;
-                var t = new Thread(() => BurnLoop(mode, idx, token))
+                new Thread(() => BurnLoop(mode, idx, token))
                 {
                     IsBackground = true,
-                    // BelowNormal — NOT Highest. The stress threads still get
-                    // ~99% of CPU time because they never voluntarily yield,
-                    // but when the HTTP listener or poll thread needs a timeslice,
-                    // the OS can preempt a BelowNormal thread immediately.
-                    // With Highest, the OS won't preempt until the quantum expires
-                    // (15.6ms on Windows default timer), causing visible UI lag.
-                    Priority = ThreadPriority.BelowNormal,
-                };
-                t.Start();
+                    Priority = ThreadPriority.Highest,
+                }.Start();
             }
-            Console.WriteLine($"[Stress] {mode} started — {_threadCount} threads (of {cores} logical cores)");
+            Console.WriteLine($"[Stress] {mode} started — {_threadCount} threads");
         }
     }
 
@@ -831,190 +812,143 @@ static class StressBurner
     static void SinkF(float v) { }
 
     // ── AVX2 FMA burn — maximum thermal output ────────────────────────────────
-    // WHY 12 CHAINS, NOT 24:
-    //   All x86-64 CPUs have exactly 16 YMM (256-bit) registers.
-    //   12 accumulators + 2 multiplier constants + 1 add constant = 15 registers.
-    //   This means ZERO register spills — every cycle feeds the FMA units directly.
-    //   With 24 chains, 8+ vectors spill to stack every iteration, turning an FMA
-    //   burn into a memory-shuffle burn that wastes 30-40% of cycles on loads/stores.
-    //
-    // WHY THESE MULTIPLIER VALUES:
-    //   mul1 (1.3f) and mul2 (0.7692308f ≈ 1/1.3) — their product is ~1.0 so values
-    //   stay bounded (no inf/nan), but the mantissa bits flip aggressively every op.
-    //   More bit-flipping = more transistor switching = more heat.
-    //   The add constants are small but non-zero to prevent denormalization.
-    //
-    // INNER LOOP DEPTH:
-    //   2000 iterations before checking cancellation — amortizes the token check
-    //   and Interlocked.Add overhead to near zero. At ~2 FMA/cycle/port × 2 ports,
-    //   this is <1ms per outer iteration on any modern CPU, so stop latency is fine.
-    //
-    // FP32 vs FP64:
-    //   Vector256<float> = 8 ops/instruction vs 4 for double.
-    //   FP32 FMA throughput is 2× FP64 on all AMD Zen / Intel Core CPUs.
-    //   12 chains × 8 floats = 96 FP32 FMAs per inner iteration — enough to
-    //   saturate both FMA pipes on Zen2+ (2×256-bit) and Intel Haswell+ (2×256-bit).
+    // Uses FP32 (float) instead of FP64 (double):
+    //   - Vector256<float> = 8 floats vs 4 doubles per register
+    //   - FP32 FMA throughput is 2x FP64 on all modern x86 CPUs
+    //   - 24 independent chains × 8 floats = 192 FMA ops per inner iteration
+    //   - Fills all FP execution ports simultaneously → maximum power draw
+    // This is equivalent to what Prime95 Small FFT achieves thermally.
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void AvxFmaBurn(CancellationToken token)
     {
         if (Fma.IsSupported && Avx.IsSupported)
         {
-            // 12 independent accumulator chains — fits in 16 YMM regs with constants
-            // Each vector has diverse initial values to maximize mantissa bit variety
-            var r0  = Vector256.Create(1.111f, 2.222f, 3.333f, 4.444f, 5.555f, 6.666f, 7.777f, 8.888f);
-            var r1  = Vector256.Create(9.101f, 8.202f, 7.303f, 6.404f, 5.505f, 4.606f, 3.707f, 2.808f);
-            var r2  = Vector256.Create(1.234f, 5.678f, 9.012f, 3.456f, 7.890f, 2.345f, 6.789f, 0.123f);
-            var r3  = Vector256.Create(3.142f, 2.718f, 1.618f, 0.577f, 1.414f, 1.732f, 2.236f, 2.449f);
-            var r4  = Vector256.Create(7.389f, 4.810f, 6.283f, 0.693f, 1.099f, 2.303f, 0.434f, 1.386f);
-            var r5  = Vector256.Create(0.301f, 0.477f, 0.699f, 0.903f, 1.204f, 1.505f, 1.806f, 2.107f);
-            var r6  = Vector256.Create(5.050f, 4.040f, 3.030f, 2.020f, 1.010f, 6.060f, 7.070f, 8.080f);
-            var r7  = Vector256.Create(9.876f, 8.765f, 7.654f, 6.543f, 5.432f, 4.321f, 3.210f, 2.109f);
-            var r8  = Vector256.Create(1.001f, 2.002f, 4.004f, 8.008f, 3.003f, 6.006f, 5.005f, 7.007f);
-            var r9  = Vector256.Create(0.112f, 0.224f, 0.448f, 0.896f, 1.792f, 3.584f, 7.168f, 5.372f);
-            var r10 = Vector256.Create(2.468f, 1.357f, 8.024f, 6.913f, 4.680f, 0.246f, 9.135f, 7.802f);
-            var r11 = Vector256.Create(4.567f, 3.456f, 2.345f, 1.234f, 8.765f, 7.654f, 6.543f, 5.432f);
+            // 24 independent chains × 8 floats = 192 FP32 FMAs per inner iter
+            // Independent chains = no data dependency stalls = max FP throughput
+            var a = Vector256.Create(1.10f, 1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f);
+            var b = Vector256.Create(1.20f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f, 1.26f, 1.27f);
+            var c = Vector256.Create(1.30f, 1.31f, 1.32f, 1.33f, 1.34f, 1.35f, 1.36f, 1.37f);
+            var d = Vector256.Create(1.40f, 1.41f, 1.42f, 1.43f, 1.44f, 1.45f, 1.46f, 1.47f);
+            var e = Vector256.Create(1.50f, 1.51f, 1.52f, 1.53f, 1.54f, 1.55f, 1.56f, 1.57f);
+            var f = Vector256.Create(1.60f, 1.61f, 1.62f, 1.63f, 1.64f, 1.65f, 1.66f, 1.67f);
+            var g = Vector256.Create(0.90f, 0.91f, 0.92f, 0.93f, 0.94f, 0.95f, 0.96f, 0.97f);
+            var h = Vector256.Create(0.80f, 0.81f, 0.82f, 0.83f, 0.84f, 0.85f, 0.86f, 0.87f);
+            var i = Vector256.Create(0.70f, 0.71f, 0.72f, 0.73f, 0.74f, 0.75f, 0.76f, 0.77f);
+            var j = Vector256.Create(0.60f, 0.61f, 0.62f, 0.63f, 0.64f, 0.65f, 0.66f, 0.67f);
+            var k = Vector256.Create(1.70f, 1.71f, 1.72f, 1.73f, 1.74f, 1.75f, 1.76f, 1.77f);
+            var l = Vector256.Create(1.80f, 1.81f, 1.82f, 1.83f, 1.84f, 1.85f, 1.86f, 1.87f);
+            var m = Vector256.Create(1.90f, 1.91f, 1.92f, 1.93f, 1.94f, 1.95f, 1.96f, 1.97f);
+            var n = Vector256.Create(0.50f, 0.51f, 0.52f, 0.53f, 0.54f, 0.55f, 0.56f, 0.57f);
+            var o = Vector256.Create(0.40f, 0.41f, 0.42f, 0.43f, 0.44f, 0.45f, 0.46f, 0.47f);
+            var p = Vector256.Create(0.30f, 0.31f, 0.32f, 0.33f, 0.34f, 0.35f, 0.36f, 0.37f);
+            var q = Vector256.Create(2.00f, 2.01f, 2.02f, 2.03f, 2.04f, 2.05f, 2.06f, 2.07f);
+            var r = Vector256.Create(2.10f, 2.11f, 2.12f, 2.13f, 2.14f, 2.15f, 2.16f, 2.17f);
+            var s = Vector256.Create(0.20f, 0.21f, 0.22f, 0.23f, 0.24f, 0.25f, 0.26f, 0.27f);
+            var t2= Vector256.Create(0.10f, 0.11f, 0.12f, 0.13f, 0.14f, 0.15f, 0.16f, 0.17f);
+            var u = Vector256.Create(2.20f, 2.21f, 2.22f, 2.23f, 2.24f, 2.25f, 2.26f, 2.27f);
+            var v = Vector256.Create(2.30f, 2.31f, 2.32f, 2.33f, 2.34f, 2.35f, 2.36f, 2.37f);
+            var w = Vector256.Create(0.85f, 0.86f, 0.87f, 0.88f, 0.89f, 0.90f, 0.91f, 0.92f);
+            var x = Vector256.Create(0.75f, 0.76f, 0.77f, 0.78f, 0.79f, 0.80f, 0.81f, 0.82f);
 
-            // Multiplier pair: 1.3 × 0.7692308 ≈ 1.0 — values stay bounded,
-            // but mantissa bits churn heavily every operation
-            var mul1 = Vector256.Create(1.3f);
-            var mul2 = Vector256.Create(0.7692308f);
-            // Small non-zero addend — prevents denormals, adds extra bit noise
-            var addC = Vector256.Create(1e-6f);
+            var mulUp   = Vector256.Create(1.00000007f);
+            var mulDown = Vector256.Create(0.99999993f);
+            var addC    = Vector256.Create(0.00000001f);
 
             while (!token.IsCancellationRequested)
             {
-                // 2000 inner iterations × 12 chains × 8 floats = 192,000 FP32 FMAs
-                // Alternating mul1/mul2 per iteration keeps values bounded
-                for (int n = 0; n < 2000; n++)
+                // 500 unrolled × 24 chains × 8 floats = 96000 FP32 FMAs per outer iter
+                for (int nn = 0; nn < 500; nn++)
                 {
-                    // Even iteration: multiply by 1.3 + add
-                    r0  = Fma.MultiplyAdd(r0,  mul1, addC);
-                    r1  = Fma.MultiplyAdd(r1,  mul1, addC);
-                    r2  = Fma.MultiplyAdd(r2,  mul1, addC);
-                    r3  = Fma.MultiplyAdd(r3,  mul1, addC);
-                    r4  = Fma.MultiplyAdd(r4,  mul1, addC);
-                    r5  = Fma.MultiplyAdd(r5,  mul1, addC);
-                    r6  = Fma.MultiplyAdd(r6,  mul1, addC);
-                    r7  = Fma.MultiplyAdd(r7,  mul1, addC);
-                    r8  = Fma.MultiplyAdd(r8,  mul1, addC);
-                    r9  = Fma.MultiplyAdd(r9,  mul1, addC);
-                    r10 = Fma.MultiplyAdd(r10, mul1, addC);
-                    r11 = Fma.MultiplyAdd(r11, mul1, addC);
-
-                    // Odd iteration: multiply by ~1/1.3 + add — pulls values back down
-                    r0  = Fma.MultiplyAdd(r0,  mul2, addC);
-                    r1  = Fma.MultiplyAdd(r1,  mul2, addC);
-                    r2  = Fma.MultiplyAdd(r2,  mul2, addC);
-                    r3  = Fma.MultiplyAdd(r3,  mul2, addC);
-                    r4  = Fma.MultiplyAdd(r4,  mul2, addC);
-                    r5  = Fma.MultiplyAdd(r5,  mul2, addC);
-                    r6  = Fma.MultiplyAdd(r6,  mul2, addC);
-                    r7  = Fma.MultiplyAdd(r7,  mul2, addC);
-                    r8  = Fma.MultiplyAdd(r8,  mul2, addC);
-                    r9  = Fma.MultiplyAdd(r9,  mul2, addC);
-                    r10 = Fma.MultiplyAdd(r10, mul2, addC);
-                    r11 = Fma.MultiplyAdd(r11, mul2, addC);
+                    a  = Fma.MultiplyAdd(a,  mulUp,   addC);
+                    b  = Fma.MultiplyAdd(b,  mulUp,   addC);
+                    c  = Fma.MultiplyAdd(c,  mulUp,   addC);
+                    d  = Fma.MultiplyAdd(d,  mulUp,   addC);
+                    e  = Fma.MultiplyAdd(e,  mulUp,   addC);
+                    f  = Fma.MultiplyAdd(f,  mulUp,   addC);
+                    g  = Fma.MultiplyAdd(g,  mulDown, addC);
+                    h  = Fma.MultiplyAdd(h,  mulDown, addC);
+                    i  = Fma.MultiplyAdd(i,  mulDown, addC);
+                    j  = Fma.MultiplyAdd(j,  mulDown, addC);
+                    k  = Fma.MultiplyAdd(k,  mulUp,   addC);
+                    l  = Fma.MultiplyAdd(l,  mulDown, addC);
+                    m  = Fma.MultiplyAdd(m,  mulUp,   addC);
+                    n  = Fma.MultiplyAdd(n,  mulDown, addC);
+                    o  = Fma.MultiplyAdd(o,  mulDown, addC);
+                    p  = Fma.MultiplyAdd(p,  mulDown, addC);
+                    q  = Fma.MultiplyAdd(q,  mulUp,   addC);
+                    r  = Fma.MultiplyAdd(r,  mulUp,   addC);
+                    s  = Fma.MultiplyAdd(s,  mulDown, addC);
+                    t2 = Fma.MultiplyAdd(t2, mulDown, addC);
+                    u  = Fma.MultiplyAdd(u,  mulUp,   addC);
+                    v  = Fma.MultiplyAdd(v,  mulUp,   addC);
+                    w  = Fma.MultiplyAdd(w,  mulDown, addC);
+                    x  = Fma.MultiplyAdd(x,  mulDown, addC);
                 }
 
-                // Sink all 12 chains — prevents JIT dead-code elimination
-                var sum = Avx.Add(Avx.Add(Avx.Add(r0, r1), Avx.Add(r2, r3)),
-                          Avx.Add(Avx.Add(Avx.Add(r4, r5), Avx.Add(r6, r7)),
-                          Avx.Add(Avx.Add(r8, r9), Avx.Add(r10, r11))));
-                SinkF(sum[0]);
+                // Sink all 24 chains — JIT must keep every register alive
+                var sum1 = Avx.Add(Avx.Add(Avx.Add(a, b), Avx.Add(c, d)),
+                           Avx.Add(Avx.Add(Avx.Add(e, f), Avx.Add(g, h)),
+                           Avx.Add(Avx.Add(i, j), Avx.Add(k, l))));
+                var sum2 = Avx.Add(Avx.Add(Avx.Add(m, n), Avx.Add(o, p)),
+                           Avx.Add(Avx.Add(Avx.Add(q, r), Avx.Add(s, t2)),
+                           Avx.Add(Avx.Add(u, v), Avx.Add(w, x))));
+                SinkF(Avx.Add(sum1, sum2)[0]);
 
-                // 2000 inner × 2 FMAs per chain × 12 chains = 48000 FMAs per outer
-                Interlocked.Add(ref _totalIters, 2000L * 2 * 12);
+                Interlocked.Add(ref _totalIters, 500 * 24);
             }
         }
         else
         {
-            // Scalar FMA fallback for CPUs without AVX2+FMA (rare but possible)
-            // 8 independent FP64 chains — fills the scalar FP pipeline on any OoO CPU
-            double a=1.111,b=2.222,c=3.333,d=4.444,
-                   e=5.555,f=6.666,g=7.777,h=8.888;
+            // Scalar fallback — 16 independent chains, fills out-of-order pipeline
+            double a=1.1,b=1.2,c=1.3,d=1.4,e=1.5,f=1.6,g=1.7,h=1.8,
+                   i2=1.9,j=2.0,k=2.1,l=2.2,m=2.3,nn=2.4,o=2.5,p=2.6;
             while (!token.IsCancellationRequested)
             {
-                for (int n = 0; n < 20000; n++)
+                for (int n = 0; n < 10000; n++)
                 {
-                    a=a*1.3+1e-10; b=b*1.3+1e-10;
-                    c=c*1.3+1e-10; d=d*1.3+1e-10;
-                    e=e*1.3+1e-10; f=f*1.3+1e-10;
-                    g=g*1.3+1e-10; h=h*1.3+1e-10;
-                    a=a*0.7692308+1e-10; b=b*0.7692308+1e-10;
-                    c=c*0.7692308+1e-10; d=d*0.7692308+1e-10;
-                    e=e*0.7692308+1e-10; f=f*0.7692308+1e-10;
-                    g=g*0.7692308+1e-10; h=h*0.7692308+1e-10;
+                    a=a*1.0000001+0.0000001; b=b*1.0000002+0.0000002;
+                    c=c*1.0000003+0.0000003; d=d*1.0000004+0.0000004;
+                    e=e*0.9999999+0.0000001; f=f*0.9999998+0.0000002;
+                    g=g*0.9999997+0.0000003; h=h*0.9999996+0.0000004;
+                    i2=i2*1.0000005+0.0000005; j=j*1.0000006+0.0000006;
+                    k=k*1.0000007+0.0000007;   l=l*1.0000008+0.0000008;
+                    m=m*0.9999995+0.0000005;   nn=nn*0.9999994+0.0000006;
+                    o=o*0.9999993+0.0000007;   p=p*0.9999992+0.0000008;
                 }
-                Sink(a+b+c+d+e+f+g+h);
-                Interlocked.Add(ref _totalIters, 20000L * 2 * 8);
+                Sink(a+b+c+d+e+f+g+h+i2+j+k+l+m+nn+o+p);
+                Interlocked.Add(ref _totalIters, 10000 * 16);
             }
         }
     }
 
     // ── Memory burn — saturates IMC + all DRAM channels ──────────────────────
-    // DESIGN GOALS:
-    //   - Force real DRAM traffic, not just L3 hits
-    //   - Work set >> largest L3 on any consumer CPU (128MB V-Cache, 36MB Intel)
-    //   - Multiple access patterns to stress different IMC queue/scheduler paths
-    //   - Full buffer coverage every pass — no partial touches
-    //
-    // 4 PASSES PER ITERATION:
-    //   1. Sequential AVX2 write-read-add — maxes out prefetcher, peak bandwidth
-    //   2. Reverse sweep — different TLB/prefetch pattern, keeps IMC switching
-    //   3. Stride-127 over FULL buffer — prime stride defeats all prefetchers,
-    //      forces cache miss on every access, stresses TLB hard
-    //   4. Block-random 4KB hops — worst case for IMC latency, simulates real
-    //      application memory access chaos
-    //
-    // BUFFER SIZE:
-    //   512MB per thread (or 256MB fallback on low-memory systems).
-    //   At 16 threads × 512MB = 8GB touched — any DDR4/DDR5 system will have
-    //   its memory controller working at maximum capacity.
+    // 3 passes per iteration:
+    //   1. Sequential AVX2 read+write (256-bit stores, max bandwidth)
+    //   2. Stride-127 (prime stride — busts prefetcher, forces cache misses)
+    //   3. Reverse sequential (different access pattern, keeps IMC busy)
+    // 256MB per thread — well above L3 (32MB on 7800X3D), forces real DRAM traffic
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void MemoryBurn(int idx, CancellationToken token)
     {
-        // Try 512MB (64M doubles), fall back to 256MB, then 64MB
-        int size;
+        int size = 32 * 1024 * 1024; // 256MB per thread (doubles)
         double[] A, B;
-        try
-        {
-            size = 64 * 1024 * 1024; // 512MB per array
-            A = new double[size]; B = new double[size];
-        }
+        try   { A = new double[size]; B = new double[size]; }
         catch (OutOfMemoryException)
-        {
-            try
-            {
-                size = 32 * 1024 * 1024; // 256MB fallback
-                A = new double[size]; B = new double[size];
-            }
-            catch (OutOfMemoryException)
-            {
-                size = 8 * 1024 * 1024; // 64MB last resort
-                A = new double[size]; B = new double[size];
-            }
-        }
+        { size = 8 * 1024 * 1024; A = new double[size]; B = new double[size]; }
 
-        // Initialize with non-trivial values — different per thread so no aliasing
         for (int n = 0; n < size; n++)
         {
             A[n] = 1.0 + idx * 0.000001 + n * 0.0000000001;
             B[n] = 1.0000003 + n * 0.0000000002;
         }
 
-        // LCG state for pseudo-random access in pass 4
-        // Multiplier from Knuth — full-period for any power-of-2 modulus
-        ulong rngState = (ulong)(idx * 7919 + 104729);
-        const ulong LCG_MULT = 6364136223846793005UL;
-        const ulong LCG_INC  = 1442695040888963407UL;
-
+        int stridePos = (idx * 127) % size;
         var vAdd = Vector256.Create(0.0000001);
 
         while (!token.IsCancellationRequested)
         {
-            // ── Pass 1: Sequential forward — peak bandwidth ──────────────────
-            // Hardware prefetcher runs at full speed, this is the theoretical
-            // max throughput the memory subsystem can deliver
+            // Pass 1: sequential forward — hardware prefetcher maxed out
+            // AVX2: processes 4 doubles per instruction = 32 bytes/instruction
             if (Avx.IsSupported)
             {
                 unsafe
@@ -1033,13 +967,17 @@ static class StressBurner
             else
             {
                 for (int n = 0; n < size; n++)
-                    A[n] += B[n];
+                    A[n] = A[n] + B[n];
             }
 
-            if (token.IsCancellationRequested) break;
+            // Pass 2: stride-127 — non-power-of-2 stride defeats prefetcher
+            for (int n = 0; n < 2 * 1024 * 1024; n++)
+            {
+                A[stridePos] = A[stridePos] * 1.0000001 + B[stridePos];
+                stridePos = (stridePos + 127) % size;
+            }
 
-            // ── Pass 2: Reverse sequential — different prefetch/TLB pattern ──
-            // IMC sees traffic from opposite direction — stresses page scheduling
+            // Pass 3: reverse sequential — different access pattern, IMC stays hot
             if (Avx.IsSupported)
             {
                 unsafe
@@ -1050,7 +988,8 @@ static class StressBurner
                         {
                             var va = Avx.LoadVector256(pA + n);
                             var vb = Avx.LoadVector256(pB + n);
-                            Avx.Store(pB + n, Avx.Add(vb, va));
+                            Avx.Store(pA + n, Avx.Add(va, vAdd));
+                            _ = vb[0]; // read B to keep both arrays in traffic
                         }
                     }
                 }
@@ -1058,164 +997,106 @@ static class StressBurner
             else
             {
                 for (int n = size - 1; n >= 0; n--)
-                    B[n] += A[n];
+                    A[n] = A[n] + 0.0000001;
             }
 
-            if (token.IsCancellationRequested) break;
-
-            // ── Pass 3: Stride-127 over FULL buffer ──────────────────────────
-            // Prime stride 127 defeats hardware prefetcher on all CPUs:
-            //   - Not a power of 2 → no stride-pattern detection
-            //   - Touches every page eventually (127 is coprime with any power-of-2 size)
-            //   - Each access is a guaranteed cache miss (127 doubles = 1016 bytes apart,
-            //     crosses cache line boundaries unpredictably)
-            // We run through the entire buffer once (size iterations)
-            {
-                int pos = (idx * 127) % size;
-                int count = Math.Min(size, 16 * 1024 * 1024); // cap at 16M touches per pass
-                for (int n = 0; n < count; n++)
-                {
-                    A[pos] = A[pos] * 1.0000001 + B[pos];
-                    pos += 127;
-                    if (pos >= size) pos -= size;
-                }
-            }
-
-            if (token.IsCancellationRequested) break;
-
-            // ── Pass 4: Block-random 4KB hops — worst-case IMC latency ───────
-            // Jumps to a pseudo-random 4KB-aligned position each step, reads and
-            // writes a cache line. This is the pattern that exposes IMC weakness:
-            //   - Zero spatial locality → prefetcher useless
-            //   - 4KB alignment → every hop is a potential TLB miss
-            //   - Forces the memory controller to handle random row activations
-            {
-                int blockCount = size / 512; // 4KB blocks (512 doubles = 4096 bytes)
-                int hops = Math.Min(blockCount, 4 * 1024 * 1024); // 4M random hops
-                for (int n = 0; n < hops; n++)
-                {
-                    rngState = rngState * LCG_MULT + LCG_INC;
-                    int blockIdx = (int)((rngState >> 16) % (ulong)blockCount);
-                    int pos = blockIdx * 512;
-                    // Read-modify-write a cache line at the random position
-                    A[pos]     += B[pos];
-                    A[pos + 1] += B[pos + 1];
-                    A[pos + 2] += B[pos + 2];
-                    A[pos + 3] += B[pos + 3];
-                    A[pos + 4] += B[pos + 4];
-                    A[pos + 5] += B[pos + 5];
-                    A[pos + 6] += B[pos + 6];
-                    A[pos + 7] += B[pos + 7];
-                }
-            }
-
-            Interlocked.Add(ref _totalIters, (long)size * 3 + 16L * 1024 * 1024);
+            Interlocked.Add(ref _totalIters, (long)size * 2 + 2 * 1024 * 1024);
         }
     }
 
-    // ── Combined burn — FMA + memory pressure on every thread ──────────────
-    // GOAL: Maximum package power draw on any system.
-    // Each thread alternates between:
-    //   - 8 rounds of the 12-chain FMA loop (pegs FP execution units)
-    //   - 1 full sequential sweep of a 256MB buffer (forces DRAM traffic)
-    //   - 1 stride-127 sweep (defeats prefetcher, stresses TLB)
-    // This is harder than splitting threads half-FMA/half-memory because every
-    // core is simultaneously demanding both FP throughput AND memory bandwidth.
-    // The memory controller must service requests from all cores while they're
-    // also hammering the FMA units — worst case for power delivery on any board.
+    // ── Combined burn — FP32 FMA + memory pressure on every thread ───────────
+    // Each thread runs 8 FMA outer iterations then does one sequential memory
+    // pass over a 64MB buffer (above L3), then repeats. This keeps the FP units
+    // pegged while forcing real DRAM traffic from every core simultaneously —
+    // achieving higher package power than splitting threads half/half.
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void AvxFmaMemBurn(int idx, CancellationToken token)
     {
-        // 256MB buffer per thread (32M doubles) — above any consumer L3
-        int memSize;
+        // 64MB buffer per thread — above L3 on all current desktop CPUs
+        int memSize = 8 * 1024 * 1024; // 64MB (doubles)
         double[] mem;
-        try
-        {
-            memSize = 32 * 1024 * 1024;
-            mem = new double[memSize];
-        }
-        catch (OutOfMemoryException)
-        {
-            try
-            {
-                memSize = 8 * 1024 * 1024;
-                mem = new double[memSize];
-            }
-            catch
-            {
-                memSize = 1024 * 1024;
-                mem = new double[memSize];
-            }
-        }
+        try   { mem = new double[memSize]; }
+        catch { mem = new double[1024 * 1024]; memSize = mem.Length; }
         for (int n = 0; n < memSize; n++)
             mem[n] = 1.0 + idx * 0.000001 + n * 0.0000000001;
 
-        // Same 12-chain register-correct FMA setup as AvxFmaBurn
+        // Same 24-chain FP32 register setup as AvxFmaBurn
         if (Fma.IsSupported && Avx.IsSupported)
         {
-            var r0  = Vector256.Create(1.111f, 2.222f, 3.333f, 4.444f, 5.555f, 6.666f, 7.777f, 8.888f);
-            var r1  = Vector256.Create(9.101f, 8.202f, 7.303f, 6.404f, 5.505f, 4.606f, 3.707f, 2.808f);
-            var r2  = Vector256.Create(1.234f, 5.678f, 9.012f, 3.456f, 7.890f, 2.345f, 6.789f, 0.123f);
-            var r3  = Vector256.Create(3.142f, 2.718f, 1.618f, 0.577f, 1.414f, 1.732f, 2.236f, 2.449f);
-            var r4  = Vector256.Create(7.389f, 4.810f, 6.283f, 0.693f, 1.099f, 2.303f, 0.434f, 1.386f);
-            var r5  = Vector256.Create(0.301f, 0.477f, 0.699f, 0.903f, 1.204f, 1.505f, 1.806f, 2.107f);
-            var r6  = Vector256.Create(5.050f, 4.040f, 3.030f, 2.020f, 1.010f, 6.060f, 7.070f, 8.080f);
-            var r7  = Vector256.Create(9.876f, 8.765f, 7.654f, 6.543f, 5.432f, 4.321f, 3.210f, 2.109f);
-            var r8  = Vector256.Create(1.001f, 2.002f, 4.004f, 8.008f, 3.003f, 6.006f, 5.005f, 7.007f);
-            var r9  = Vector256.Create(0.112f, 0.224f, 0.448f, 0.896f, 1.792f, 3.584f, 7.168f, 5.372f);
-            var r10 = Vector256.Create(2.468f, 1.357f, 8.024f, 6.913f, 4.680f, 0.246f, 9.135f, 7.802f);
-            var r11 = Vector256.Create(4.567f, 3.456f, 2.345f, 1.234f, 8.765f, 7.654f, 6.543f, 5.432f);
+            var a  = Vector256.Create(1.10f, 1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f);
+            var b  = Vector256.Create(1.20f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f, 1.26f, 1.27f);
+            var c  = Vector256.Create(1.30f, 1.31f, 1.32f, 1.33f, 1.34f, 1.35f, 1.36f, 1.37f);
+            var d  = Vector256.Create(1.40f, 1.41f, 1.42f, 1.43f, 1.44f, 1.45f, 1.46f, 1.47f);
+            var e  = Vector256.Create(1.50f, 1.51f, 1.52f, 1.53f, 1.54f, 1.55f, 1.56f, 1.57f);
+            var f  = Vector256.Create(1.60f, 1.61f, 1.62f, 1.63f, 1.64f, 1.65f, 1.66f, 1.67f);
+            var g  = Vector256.Create(0.90f, 0.91f, 0.92f, 0.93f, 0.94f, 0.95f, 0.96f, 0.97f);
+            var h  = Vector256.Create(0.80f, 0.81f, 0.82f, 0.83f, 0.84f, 0.85f, 0.86f, 0.87f);
+            var ii = Vector256.Create(0.70f, 0.71f, 0.72f, 0.73f, 0.74f, 0.75f, 0.76f, 0.77f);
+            var jj = Vector256.Create(0.60f, 0.61f, 0.62f, 0.63f, 0.64f, 0.65f, 0.66f, 0.67f);
+            var k  = Vector256.Create(1.70f, 1.71f, 1.72f, 1.73f, 1.74f, 1.75f, 1.76f, 1.77f);
+            var l  = Vector256.Create(1.80f, 1.81f, 1.82f, 1.83f, 1.84f, 1.85f, 1.86f, 1.87f);
+            var mm = Vector256.Create(1.90f, 1.91f, 1.92f, 1.93f, 1.94f, 1.95f, 1.96f, 1.97f);
+            var nn = Vector256.Create(0.50f, 0.51f, 0.52f, 0.53f, 0.54f, 0.55f, 0.56f, 0.57f);
+            var oo = Vector256.Create(0.40f, 0.41f, 0.42f, 0.43f, 0.44f, 0.45f, 0.46f, 0.47f);
+            var pp = Vector256.Create(0.30f, 0.31f, 0.32f, 0.33f, 0.34f, 0.35f, 0.36f, 0.37f);
+            var q  = Vector256.Create(2.00f, 2.01f, 2.02f, 2.03f, 2.04f, 2.05f, 2.06f, 2.07f);
+            var r  = Vector256.Create(2.10f, 2.11f, 2.12f, 2.13f, 2.14f, 2.15f, 2.16f, 2.17f);
+            var ss = Vector256.Create(0.20f, 0.21f, 0.22f, 0.23f, 0.24f, 0.25f, 0.26f, 0.27f);
+            var tt = Vector256.Create(0.10f, 0.11f, 0.12f, 0.13f, 0.14f, 0.15f, 0.16f, 0.17f);
+            var u  = Vector256.Create(2.20f, 2.21f, 2.22f, 2.23f, 2.24f, 2.25f, 2.26f, 2.27f);
+            var vv = Vector256.Create(2.30f, 2.31f, 2.32f, 2.33f, 2.34f, 2.35f, 2.36f, 2.37f);
+            var ww = Vector256.Create(0.85f, 0.86f, 0.87f, 0.88f, 0.89f, 0.90f, 0.91f, 0.92f);
+            var xx = Vector256.Create(0.75f, 0.76f, 0.77f, 0.78f, 0.79f, 0.80f, 0.81f, 0.82f);
 
-            var mul1 = Vector256.Create(1.3f);
-            var mul2 = Vector256.Create(0.7692308f);
-            var addC = Vector256.Create(1e-6f);
-            var vAdd = Vector256.Create(0.0000001);
+            var mulUp   = Vector256.Create(1.00000007f);
+            var mulDown = Vector256.Create(0.99999993f);
+            var addC    = Vector256.Create(0.00000001f);
+            var vAdd    = Vector256.Create(0.0000001);
 
-            int stridePos = (idx * 127) % memSize;
-
+            int outerCount = 0;
             while (!token.IsCancellationRequested)
             {
-                // ── Phase 1: 8 rounds of FMA burn (pegs FP units) ────────────
+                // 8 FMA outer iterations (same as AvxFmaBurn inner loop × 500)
                 for (int rep = 0; rep < 8 && !token.IsCancellationRequested; rep++)
                 {
-                    for (int n = 0; n < 2000; n++)
+                    for (int n = 0; n < 500; n++)
                     {
-                        r0  = Fma.MultiplyAdd(r0,  mul1, addC);
-                        r1  = Fma.MultiplyAdd(r1,  mul1, addC);
-                        r2  = Fma.MultiplyAdd(r2,  mul1, addC);
-                        r3  = Fma.MultiplyAdd(r3,  mul1, addC);
-                        r4  = Fma.MultiplyAdd(r4,  mul1, addC);
-                        r5  = Fma.MultiplyAdd(r5,  mul1, addC);
-                        r6  = Fma.MultiplyAdd(r6,  mul1, addC);
-                        r7  = Fma.MultiplyAdd(r7,  mul1, addC);
-                        r8  = Fma.MultiplyAdd(r8,  mul1, addC);
-                        r9  = Fma.MultiplyAdd(r9,  mul1, addC);
-                        r10 = Fma.MultiplyAdd(r10, mul1, addC);
-                        r11 = Fma.MultiplyAdd(r11, mul1, addC);
-
-                        r0  = Fma.MultiplyAdd(r0,  mul2, addC);
-                        r1  = Fma.MultiplyAdd(r1,  mul2, addC);
-                        r2  = Fma.MultiplyAdd(r2,  mul2, addC);
-                        r3  = Fma.MultiplyAdd(r3,  mul2, addC);
-                        r4  = Fma.MultiplyAdd(r4,  mul2, addC);
-                        r5  = Fma.MultiplyAdd(r5,  mul2, addC);
-                        r6  = Fma.MultiplyAdd(r6,  mul2, addC);
-                        r7  = Fma.MultiplyAdd(r7,  mul2, addC);
-                        r8  = Fma.MultiplyAdd(r8,  mul2, addC);
-                        r9  = Fma.MultiplyAdd(r9,  mul2, addC);
-                        r10 = Fma.MultiplyAdd(r10, mul2, addC);
-                        r11 = Fma.MultiplyAdd(r11, mul2, addC);
+                        a  = Fma.MultiplyAdd(a,  mulUp,   addC);
+                        b  = Fma.MultiplyAdd(b,  mulUp,   addC);
+                        c  = Fma.MultiplyAdd(c,  mulUp,   addC);
+                        d  = Fma.MultiplyAdd(d,  mulUp,   addC);
+                        e  = Fma.MultiplyAdd(e,  mulUp,   addC);
+                        f  = Fma.MultiplyAdd(f,  mulUp,   addC);
+                        g  = Fma.MultiplyAdd(g,  mulDown, addC);
+                        h  = Fma.MultiplyAdd(h,  mulDown, addC);
+                        ii = Fma.MultiplyAdd(ii, mulDown, addC);
+                        jj = Fma.MultiplyAdd(jj, mulDown, addC);
+                        k  = Fma.MultiplyAdd(k,  mulUp,   addC);
+                        l  = Fma.MultiplyAdd(l,  mulDown, addC);
+                        mm = Fma.MultiplyAdd(mm, mulUp,   addC);
+                        nn = Fma.MultiplyAdd(nn, mulDown, addC);
+                        oo = Fma.MultiplyAdd(oo, mulDown, addC);
+                        pp = Fma.MultiplyAdd(pp, mulDown, addC);
+                        q  = Fma.MultiplyAdd(q,  mulUp,   addC);
+                        r  = Fma.MultiplyAdd(r,  mulUp,   addC);
+                        ss = Fma.MultiplyAdd(ss, mulDown, addC);
+                        tt = Fma.MultiplyAdd(tt, mulDown, addC);
+                        u  = Fma.MultiplyAdd(u,  mulUp,   addC);
+                        vv = Fma.MultiplyAdd(vv, mulUp,   addC);
+                        ww = Fma.MultiplyAdd(ww, mulDown, addC);
+                        xx = Fma.MultiplyAdd(xx, mulDown, addC);
                     }
-                    var s1 = Avx.Add(Avx.Add(Avx.Add(r0, r1), Avx.Add(r2, r3)),
-                             Avx.Add(Avx.Add(Avx.Add(r4, r5), Avx.Add(r6, r7)),
-                             Avx.Add(Avx.Add(r8, r9), Avx.Add(r10, r11))));
-                    SinkF(s1[0]);
-                    Interlocked.Add(ref _totalIters, 2000L * 2 * 12);
+                    var s1 = Avx.Add(Avx.Add(Avx.Add(a, b), Avx.Add(c, d)),
+                             Avx.Add(Avx.Add(Avx.Add(e, f), Avx.Add(g, h)),
+                             Avx.Add(Avx.Add(ii, jj), Avx.Add(k, l))));
+                    var s2 = Avx.Add(Avx.Add(Avx.Add(mm, nn), Avx.Add(oo, pp)),
+                             Avx.Add(Avx.Add(Avx.Add(q, r), Avx.Add(ss, tt)),
+                             Avx.Add(Avx.Add(u, vv), Avx.Add(ww, xx))));
+                    SinkF(Avx.Add(s1, s2)[0]);
+                    Interlocked.Add(ref _totalIters, 500 * 24);
                 }
 
-                if (token.IsCancellationRequested) break;
-
-                // ── Phase 2: Sequential memory sweep (forces DRAM traffic) ───
+                // One sequential memory pass — forces real DRAM traffic
                 unsafe
                 {
                     fixed (double* pM = mem)
@@ -1227,49 +1108,26 @@ static class StressBurner
                         }
                     }
                 }
-
-                if (token.IsCancellationRequested) break;
-
-                // ── Phase 3: Stride-127 sweep (defeats prefetcher) ───────────
-                {
-                    int count = Math.Min(memSize, 4 * 1024 * 1024);
-                    for (int n = 0; n < count; n++)
-                    {
-                        mem[stridePos] = mem[stridePos] * 1.0000001 + 0.0000001;
-                        stridePos += 127;
-                        if (stridePos >= memSize) stridePos -= memSize;
-                    }
-                }
-
-                Interlocked.Add(ref _totalIters, (long)memSize + 4L * 1024 * 1024);
+                Interlocked.Add(ref _totalIters, memSize);
+                outerCount++;
             }
         }
         else
         {
-            // Scalar fallback — FMA + memory interleaved
-            double sa=1.1,sb=1.2,sc=1.3,sd=1.4,se=1.5,sf=1.6,sg=1.7,sh=1.8;
+            // Scalar fallback
+            double sa=1.1,sb=1.2,sc=1.3,sd=1.4;
             int mp = 0;
             while (!token.IsCancellationRequested)
             {
-                for (int n = 0; n < 20000; n++)
+                for (int n = 0; n < 10000; n++)
                 {
-                    sa=sa*1.3+1e-10; sb=sb*1.3+1e-10;
-                    sc=sc*1.3+1e-10; sd=sd*1.3+1e-10;
-                    se=se*1.3+1e-10; sf=sf*1.3+1e-10;
-                    sg=sg*1.3+1e-10; sh=sh*1.3+1e-10;
-                    sa=sa*0.7692308+1e-10; sb=sb*0.7692308+1e-10;
-                    sc=sc*0.7692308+1e-10; sd=sd*0.7692308+1e-10;
-                    se=se*0.7692308+1e-10; sf=sf*0.7692308+1e-10;
-                    sg=sg*0.7692308+1e-10; sh=sh*0.7692308+1e-10;
+                    sa=sa*1.0000001+0.0000001; sb=sb*1.0000002+0.0000002;
+                    sc=sc*0.9999999+0.0000001; sd=sd*0.9999998+0.0000002;
                 }
-                Sink(sa+sb+sc+sd+se+sf+sg+sh);
-                // Interleave memory touches
-                for (int n = 0; n < 4096; n++)
-                {
-                    mem[mp] = mem[mp] * 1.0000001 + 0.0000001;
-                    mp = (mp + 127) % memSize;
-                }
-                Interlocked.Add(ref _totalIters, 20000L * 2 * 8 + 4096);
+                Sink(sa+sb+sc+sd);
+                mem[mp] = mem[mp] * 1.0000001 + 0.0000001;
+                mp = (mp + 127) % memSize;
+                Interlocked.Add(ref _totalIters, 10000 * 4);
             }
         }
     }
@@ -1575,17 +1433,7 @@ static class RamTester
             AddLog($"OOM — fell back to {(long)count * 8 / 1024 / 1024} MB");
         }
 
-        // ── Multi-threaded setup ──────────────────────────────────────────────
-        // Use all logical cores for write+verify — this is what makes it fast
-        // on systems with 16, 32, 64+ threads instead of crawling single-threaded
-        int workerCount = Math.Max(1, Environment.ProcessorCount);
-        // Cap workers so each chunk is at least 1M cells (8MB) — too-small
-        // chunks have poor memory throughput due to setup overhead
-        while (workerCount > 1 && (count / workerCount) < 1024 * 1024)
-            workerCount /= 2;
-
         AddLog($"Allocated {(long)count * 8 / 1024 / 1024} MB ({count:N0} ulong cells).");
-        AddLog($"Using {workerCount} worker threads for write+verify.");
         AddLog($"Running {_totalTests} tests...");
         AddLog("─────────────────────────────────────");
 
@@ -1601,61 +1449,27 @@ static class RamTester
 
             AddLog($"Test {t+1}/{_totalTests}: {_currentName}");
 
-            // ── Multi-threaded write pass ──────────────────────────────────────
+            // ── Write pass ────────────────────────────────────────────────────
+            for (int i = 0; i < count; i++)
             {
-                var threads = new Thread[workerCount];
-                for (int w = 0; w < workerCount; w++)
-                {
-                    int wIdx  = w;
-                    int start = (int)((long)count * wIdx / workerCount);
-                    int end   = (int)((long)count * (wIdx + 1) / workerCount);
-                    threads[w] = new Thread(() =>
-                    {
-                        for (int i = start; i < end; i++)
-                        {
-                            if (_stopReq) break;
-                            buf[i] = patternFn(i);
-                        }
-                    }) { IsBackground = true };
-                    threads[w].Start();
-                }
-                foreach (var th in threads) th.Join();
+                if (_stopReq) break;
+                buf[i] = patternFn(i);
             }
             if (_stopReq) break;
 
-            // ── Multi-threaded read+verify pass ───────────────────────────────
-            long[] errorsPerWorker = new long[workerCount];
-            {
-                var threads = new Thread[workerCount];
-                for (int w = 0; w < workerCount; w++)
-                {
-                    int wIdx  = w;
-                    int start = (int)((long)count * wIdx / workerCount);
-                    int end   = (int)((long)count * (wIdx + 1) / workerCount);
-                    threads[w] = new Thread(() =>
-                    {
-                        long localErr = 0;
-                        for (int i = start; i < end; i++)
-                        {
-                            ulong expected = patternFn(i);
-                            ulong actual   = buf[i];
-                            if (actual != expected)
-                            {
-                                localErr++;
-                                if (localErr <= 3)
-                                    AddLog($"  ERROR at cell {i}: expected 0x{expected:X16}, got 0x{actual:X16}");
-                            }
-                        }
-                        errorsPerWorker[wIdx] = localErr;
-                    }) { IsBackground = true };
-                    threads[w].Start();
-                }
-                foreach (var th in threads) th.Join();
-            }
-
+            // ── Read+verify pass ──────────────────────────────────────────────
             long errors = 0;
-            for (int w = 0; w < workerCount; w++)
-                errors += errorsPerWorker[w];
+            for (int i = 0; i < count; i++)
+            {
+                ulong expected = patternFn(i);
+                ulong actual   = buf[i];
+                if (actual != expected)
+                {
+                    errors++;
+                    if (errors <= 3)
+                        AddLog($"  ERROR at cell {i}: expected 0x{expected:X16}, got 0x{actual:X16}");
+                }
+            }
 
             totalErrors  += errors;
             _totalErrors  = totalErrors;

@@ -1,4 +1,4 @@
-# app.py — HardwareToad v0.7.3 Beta  (unified tabbed UI)
+# app.py — HardwareToad v0.7.4 Beta  (unified tabbed UI)
 import collections
 import ctypes
 import queue
@@ -2492,7 +2492,7 @@ def main():
             for w in card.winfo_children():
                 w.bind("<Button-1>", on_click)
 
-            # Hover / press feedback
+           # Hover / press feedback
             _acc = t["accent"]
             def _enter(e, c=card, a=_acc):
                 c.config(bg="#1c1c1c")
@@ -2520,12 +2520,12 @@ def main():
 
             card.bind("<Enter>",           _enter)
             card.bind("<Leave>",           _leave)
-            card.bind("<ButtonPress-1>",   _press)
+            card.bind("<ButtonPress-1>",   _press, add="+")
             card.bind("<ButtonRelease-1>", _release)
             for w in card.winfo_children():
                 w.bind("<Enter>",           lambda e, c=card, a=_acc: _enter(e, c, a))
                 w.bind("<Leave>",           lambda e, c=card, a=_acc: _leave(e, c, a))
-                w.bind("<ButtonPress-1>",   lambda e, c=card: _press(e, c))
+                w.bind("<ButtonPress-1>",   lambda e, c=card: _press(e, c), add="+")
                 w.bind("<ButtonRelease-1>", lambda e, c=card, a=_acc: _release(e, c, a))
         grid_row += 1
 

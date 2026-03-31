@@ -2,8 +2,16 @@
 
 All notable changes to HardwareToad will be documented here.
 
+
 ---
 
+## [v0.7.4 Beta] - 2026-03-31
+
+### Fixed
+- **UI Event Interference** — Resolved a bug where stress test cards wouldn't launch because hover/press animations were overwriting the click-to-start event bindings.
+- **Linpack Mode Integration** — Fixed a missing key in the Stress Manager that caused Linpack tests to default to standard multi-core stress.
+- **Syntax Correction** — Fixed a calculation error in the generation counter logic within `stress_manager.py`.
+---
 
 ## [v0.7.3 Beta] - 2026-03-31
 
