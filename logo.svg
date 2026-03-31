@@ -1,0 +1,102 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- HardwareToad Robot Toad Logo -->
+  <!-- Dark background for standalone use -->
+  <rect width="512" height="512" fill="#0a0a0a" rx="0"/>
+
+  <!-- Toad body - main rounded shape -->
+  <ellipse cx="256" cy="290" rx="155" ry="130" fill="#1e1e1e" stroke="#e63946" stroke-width="2.5"/>
+
+  <!-- Belly plate - robotic armor panel -->
+  <ellipse cx="256" cy="310" rx="105" ry="85" fill="#141414" stroke="#333" stroke-width="1.5"/>
+
+  <!-- Belly circuit board lines -->
+  <line x1="200" y1="290" x2="312" y2="290" stroke="#333" stroke-width="1" stroke-dasharray="8 4"/>
+  <line x1="210" y1="310" x2="302" y2="310" stroke="#333" stroke-width="1" stroke-dasharray="6 3"/>
+  <line x1="220" y1="330" x2="292" y2="330" stroke="#333" stroke-width="1" stroke-dasharray="4 4"/>
+  <circle cx="200" cy="290" r="3" fill="#e63946" opacity="0.6"/>
+  <circle cx="312" cy="290" r="3" fill="#e63946" opacity="0.6"/>
+  <circle cx="256" cy="310" r="3" fill="#e63946" opacity="0.4"/>
+  <circle cx="235" cy="350" r="2.5" fill="#40c057" opacity="0.7"/>
+  <circle cx="277" cy="350" r="2.5" fill="#40c057" opacity="0.7"/>
+
+  <!-- Head dome -->
+  <ellipse cx="256" cy="210" rx="120" ry="80" fill="#1e1e1e" stroke="#e63946" stroke-width="2.5"/>
+
+  <!-- Forehead panel -->
+  <path d="M180 200 Q256 150 332 200" fill="none" stroke="#444" stroke-width="1.5"/>
+
+  <!-- Antenna left -->
+  <line x1="190" y1="170" x2="165" y2="120" stroke="#666" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="165" cy="120" r="6" fill="#e63946"/>
+  <circle cx="165" cy="120" r="3" fill="#ff6b6b" opacity="0.8"/>
+
+  <!-- Antenna right -->
+  <line x1="322" y1="170" x2="347" y2="120" stroke="#666" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="347" cy="120" r="6" fill="#e63946"/>
+  <circle cx="347" cy="120" r="3" fill="#ff6b6b" opacity="0.8"/>
+
+  <!-- Eye socket left -->
+  <ellipse cx="215" cy="200" rx="35" ry="30" fill="#111" stroke="#555" stroke-width="1.5"/>
+  <ellipse cx="215" cy="200" rx="22" ry="18" fill="#e63946"/>
+  <ellipse cx="215" cy="200" rx="15" ry="12" fill="#ff4757"/>
+  <ellipse cx="220" cy="198" rx="8" ry="10" fill="#1a1a1a"/>
+  <circle cx="210" cy="193" r="4" fill="white" opacity="0.7"/>
+
+  <!-- Eye socket right -->
+  <ellipse cx="297" cy="200" rx="35" ry="30" fill="#111" stroke="#555" stroke-width="1.5"/>
+  <ellipse cx="297" cy="200" rx="22" ry="18" fill="#e63946"/>
+  <ellipse cx="297" cy="200" rx="15" ry="12" fill="#ff4757"/>
+  <ellipse cx="302" cy="198" rx="8" ry="10" fill="#1a1a1a"/>
+  <circle cx="292" cy="193" r="4" fill="white" opacity="0.7"/>
+
+  <!-- Mouth -->
+  <path d="M218 240 Q256 258 294 240" fill="none" stroke="#e63946" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="218" cy="240" r="2.5" fill="#555"/>
+  <circle cx="294" cy="240" r="2.5" fill="#555"/>
+
+  <!-- Left arm -->
+  <path d="M115 280 Q90 310 95 350 Q98 365 115 370" fill="#1e1e1e" stroke="#e63946" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="108" cy="372" r="8" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="95" cy="368" r="6" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="120" cy="374" r="6" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+
+  <!-- Right arm -->
+  <path d="M397 280 Q422 310 417 350 Q414 365 397 370" fill="#1e1e1e" stroke="#e63946" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="404" cy="372" r="8" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="417" cy="368" r="6" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="392" cy="374" r="6" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+
+  <!-- Left back leg -->
+  <ellipse cx="145" cy="385" rx="35" ry="20" fill="#1e1e1e" stroke="#e63946" stroke-width="2"/>
+  <circle cx="118" cy="390" r="7" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="107" cy="385" r="5.5" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+
+  <!-- Right back leg -->
+  <ellipse cx="367" cy="385" rx="35" ry="20" fill="#1e1e1e" stroke="#e63946" stroke-width="2"/>
+  <circle cx="394" cy="390" r="7" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+  <circle cx="405" cy="385" r="5.5" fill="#1e1e1e" stroke="#e63946" stroke-width="1.5"/>
+
+  <!-- Body bolts -->
+  <circle cx="170" cy="260" r="3" fill="#444" stroke="#555" stroke-width="1"/>
+  <circle cx="342" cy="260" r="3" fill="#444" stroke="#555" stroke-width="1"/>
+  <circle cx="185" cy="360" r="3" fill="#444" stroke="#555" stroke-width="1"/>
+  <circle cx="327" cy="360" r="3" fill="#444" stroke="#555" stroke-width="1"/>
+
+  <!-- CPU chip on forehead -->
+  <rect x="237" y="165" width="38" height="28" rx="3" fill="#111" stroke="#e63946" stroke-width="1.5"/>
+  <line x1="242" y1="172" x2="270" y2="172" stroke="#e63946" stroke-width="0.8" opacity="0.5"/>
+  <line x1="242" y1="178" x2="270" y2="178" stroke="#e63946" stroke-width="0.8" opacity="0.5"/>
+  <line x1="242" y1="184" x2="270" y2="184" stroke="#e63946" stroke-width="0.8" opacity="0.5"/>
+  <line x1="243" y1="163" x2="243" y2="165" stroke="#888" stroke-width="1.5"/>
+  <line x1="250" y1="163" x2="250" y2="165" stroke="#888" stroke-width="1.5"/>
+  <line x1="257" y1="163" x2="257" y2="165" stroke="#888" stroke-width="1.5"/>
+  <line x1="264" y1="163" x2="264" y2="165" stroke="#888" stroke-width="1.5"/>
+  <line x1="243" y1="193" x2="243" y2="195" stroke="#888" stroke-width="1.5"/>
+  <line x1="250" y1="193" x2="250" y2="195" stroke="#888" stroke-width="1.5"/>
+  <line x1="257" y1="193" x2="257" y2="195" stroke="#888" stroke-width="1.5"/>
+  <line x1="264" y1="193" x2="264" y2="195" stroke="#888" stroke-width="1.5"/>
+
+  <!-- Power indicator -->
+  <circle cx="256" cy="270" r="5" fill="#111" stroke="#40c057" stroke-width="1.5"/>
+  <circle cx="256" cy="270" r="2.5" fill="#40c057" opacity="0.8"/>
+</svg>

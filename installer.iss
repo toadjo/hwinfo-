@@ -1,12 +1,12 @@
-; installer.iss — HWInfo Monitor v0.5.6 Beta
-; HWInfo Monitor - Inno Setup Installer Script
+; installer.iss — HardwareToad v0.5.6 Beta
+; HardwareToad - Inno Setup Installer Script
 
-#define AppName "HWInfo Monitor"
+#define AppName "HardwareToad"
 #ifndef AppVersion
 #define AppVersion "0.0.12"
 #endif
 #define AppPublisher "ISNET"
-#define AppExeName "HWInfoMonitor.exe"
+#define AppExeName "HardwareToad.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -16,7 +16,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf64}\{#AppName}
 DefaultGroupName={#AppName}
 OutputDir=output
-OutputBaseFilename=HWInfoMonitor_Setup
+OutputBaseFilename=HardwareToad_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -33,8 +33,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &Desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "dist\HWInfoMonitor\HWInfoMonitor.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\HWInfoMonitor\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\HardwareToad\HardwareToad.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\HardwareToad\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\{#AppExeName}"; ValueData: "RUNASADMIN"; Flags: uninsdeletevalue
@@ -80,7 +80,7 @@ procedure InitializeWizard();
 begin
   WizardForm.WelcomeLabel2.Caption :=
     WizardForm.WelcomeLabel2.Caption + #13#10#13#10 +
-    'IMPORTANT: HWInfo Monitor requires Administrator rights to ' +
+    'IMPORTANT: HardwareToad requires Administrator rights to ' +
     'access hardware sensors (CPU temperatures, fan speeds, etc.). ' +
     'The application will always request elevation when launched.';
 end;
@@ -112,7 +112,7 @@ begin
   if UninstStr = '' then Exit;
 
   Exec('powershell.exe',
-    '-NoProfile -WindowStyle Hidden -Command "Stop-Process -Name ''HWInfoMonitor'' -Force -ErrorAction SilentlyContinue; Start-Sleep 2"',
+    '-NoProfile -WindowStyle Hidden -Command "Stop-Process -Name ''HardwareToad'' -Force -ErrorAction SilentlyContinue; Start-Sleep 2"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   UninstStr := RemoveQuotes(UninstStr);

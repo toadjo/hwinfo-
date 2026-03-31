@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to HWInfo Monitor will be documented here.
+All notable changes to HardwareToad will be documented here.
 
 ---
 

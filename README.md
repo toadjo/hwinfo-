@@ -1,6 +1,6 @@
-# HWInfo Monitor
+# HardwareToad
 
-Windows hardware monitor with a Python/Tkinter desktop UI and a self-contained `.NET` bridge built on LibreHardwareMonitor.
+Windows hardware monitor with a Python/Tkinter desktop UI and a self-contained `.NET` bridge built on LibreHardwareMonitor. Features real-time CPU, GPU, RAM, and storage monitoring, AVX2/FMA stress testing, and RAM stability testing.
 
 ## Project Layout
 

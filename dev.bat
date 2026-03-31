@@ -1,5 +1,5 @@
 @echo off
-:: dev.bat — HWInfo Monitor v0.7.2 Beta
+:: dev.bat — HardwareToad v0.7.2 Beta
 cd /d "%~dp0"
 
 :: Auto-elevate to admin (required for LHMBridge ring0 access)
@@ -12,7 +12,7 @@ if %errorlevel% neq 0 (
 setlocal enabledelayedexpansion
 
 :: ── Clear stale registry settings ────────────────────────────────────────────
-reg delete "HKCU\Software\HWInfoMonitor" /f >nul 2>&1
+reg delete "HKCU\Software\HardwareToad" /f >nul 2>&1
 
 :: ── Find Python ───────────────────────────────────────────────────────────────
 set PYTHON=

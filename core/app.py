@@ -1,4 +1,4 @@
-# app.py — HWInfo Monitor v0.7.2 Beta  (unified tabbed UI)
+# app.py — HardwareToad v0.7.3 Beta  (unified tabbed UI)
 import collections
 import ctypes
 import queue
@@ -57,7 +57,7 @@ def main():
     stress_manager = StressManager(log_queue)
 
     # ── Font system ───────────────────────────────────────────────────────────
-    _FONT_KEY = r"Software\HWInfoMonitor"
+    _FONT_KEY = r"Software\HardwareToad"
     _DEFAULT_FONT = "Segoe UI"
 
     def _load_font():
@@ -216,7 +216,7 @@ def main():
         },
     }
 
-    _THEME_KEY = r"Software\HWInfoMonitor"
+    _THEME_KEY = r"Software\HardwareToad"
 
     def _load_theme_name():
         try:
@@ -240,7 +240,7 @@ def main():
     current_theme_name = [_load_theme_name()]
 
     # ── Window size registry ──────────────────────────────────────────────────
-    _WIN_SIZE_KEY = r"Software\HWInfoMonitor"
+    _WIN_SIZE_KEY = r"Software\HardwareToad"
 
     def _load_window_size():
         try:
@@ -265,7 +265,7 @@ def main():
             pass
 
     # ── Color override registry helpers ───────────────────────────────────────
-    _COLOR_KEY = r"Software\HWInfoMonitor\ColorOverrides"
+    _COLOR_KEY = r"Software\HardwareToad\ColorOverrides"
 
     def _load_color_overrides():
         try:
@@ -473,7 +473,7 @@ def main():
             b.pack_propagate(False)
             swatch_boxes.append(b)
 
-        preview_lbl = tk.Label(body, text="Preview: AaBbCc 0123 — HWInfo Monitor",
+        preview_lbl = tk.Label(body, text="Preview: AaBbCc 0123 — HardwareToad",
                                fg="#a0aec0", bg=CARD, font=(current_font[0], 11))
         preview_lbl.pack(fill="x", padx=24, pady=(0, 8))
 
@@ -657,7 +657,7 @@ def main():
 
         rw = tk.Toplevel(parent_win)
         _raw_win[0] = rw
-        rw.title(f"HWInfo Monitor {APP_VERSION} - Raw Sensors")
+        rw.title(f"HardwareToad {APP_VERSION} - Raw Sensors")
         rw.geometry("1000x660")
         rw.configure(bg=BG)
         rw.resizable(True, True)
@@ -1022,7 +1022,7 @@ def main():
     _splash.configure(bg="#0a0a0a")
     _splash.resizable(False, False)
 
-    _SW, _SH = 420, 240
+    _SW, _SH = 420, 300
     _splash.geometry(
         f"{_SW}x{_SH}+"
         f"{(_splash.winfo_screenwidth()  - _SW) // 2}+"
@@ -1037,12 +1037,69 @@ def main():
     _body = tk.Frame(_splash, bg="#0a0a0a")
     _body.pack(fill="both", expand=True, padx=2, pady=(0, 2))
 
+    # ── Robot Toad logo (base64-embedded PNG, no external file needed) ─────
+    import base64, io
+    _LOGO_B64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAIlklEQVR4nO2dz2scNxTHvymhhxxa"
+        "TNmD2cKGksJCfhgKwW7xrUsaWHoI9BDC0n+h5958yzn/QjE9FXwohiRsTwmJTUrAdQMLCSWGmBxM"
+        "Mcmxl/ZQtNZqJY1+681IHzDsjmdnnvS+etK+kbTnLly48C8qxfJBbgMqeakCKJwqgMKpAiicKoDC"
+        "qQIonCqAwqkCKJwqgMKpAiicKoDCqQIonPO5DQCAV2ub89eXDh5ntCQNlMqbPQLwlSF73zWolTer"
+        "AFSFz10psaBY3uwRoJKXKoDCySoA1QAo98AoFhTLmz0CiIXvqvMZW1cvLrzPXd5zlOYETiYTAMD2"
+        "9nZmS+JAsXzZIwAPpYqJBbUykhIAg7WULkG1TOQEQK2FhIRi2cgJgEG1xbhAuSwkBUCxpfhCtUwk"
+        "HgapmEwmQSrOJ9Xq+zWNcusHCAtge3vbuvJi5NRV17QRBtXWDxAWAEMXBUwdvnE8c77/Xn9odG+Z"
+        "IKi3foC4AGRRQOd0H0fbXlMUhuoZP+XWDxAXAGMymWDr8PXScROHq1qwDbL7iMf4+7xa21xK+VKF"
+        "vAC2Dl8vVKZLK788e+Z8/xfD60bn8XYxMWwdvsbW2mb2fL8OsgIQQ/3W1Yu4f/9+JmvsEFs/KwtF"
+        "IZATgOj4jeMZEKFvjwkTKpMriwgUhUBKALzzYwzoXgyv3zI99/Ls2U6o+7Ky8EKgIgIyAojtfCCs"
+        "U13YOJ6REwGJVDBz/sbxLJrzqcCXkcLk1+wRgHd+bHJ1ATJYNMgdCbIKwMX56+vryv/t7+9rPxvS"
+        "qT52MCiIIJsAbJ3PKnw6nSrPGY1GAMwd4EJoO3KLIMucQBfn6ypcZDQazSt/rz+cJ4JcuoAXw+tz"
+        "O33saIINDlOLILkAbEb7Jq1NBWuF9968884E/vDpx952NAmBTyWnFEG2LsC09csqXZaeFZ08nU7n"
+        "lW+azo1thw7+K2JKkkYAm9AvC7cmjhQdYBOGKdiRuisgkQcQUVX66pMHu6tPHuzqPis6Zzqdakfs"
+        "bbAjJiQFIMIqnb1fffJgd/WjFbA/2fldtiMkyQRgGv5tRtr9w0foHz5SOoDh0vpM7WA2AAhiR+os"
+        "IfkIwFrR26++Gc8P3rw9ZpUOAPxr8XMx7ej3+2evJTbEsCM05AWwwM3bY9H5DBYJUtnBO5+3AUA6"
+        "OwLQLgFUglMFUDitEsDb96de/++aHSEgLwDXNK5P+peyHaFJJgCW2WpKd+7v72tTp2/fn+L3wZWl"
+        "47JjDJdsYJMdKht0rd/EjpoJlCBrRbwDRGfEanXidXU2xLQjJCQFIGt9KhE0Od/nWYCJHTIbQtsR"
+        "k2yPg10fCAFmT+GAcJWeyo4ccwKyPQ7e6w+NRDAajZYq3yS0mjyCtSG2HTkeBQMFzAgKSZ0RFJA6"
+        "J/CMXM4HMu8TmHpWcEhC2ZHT+QCBjSJTrgugRm7nAwS+BpomiLoGBecDBFYG8bBK6XI0oCb0LF3A"
+        "eHz2KP3em3fSc7ooApXz2bRzANjd1U41DE5yAYzHY5yenuXLV1ZWFgZNYiV1QQi6Mq2vry/VR0oR"
+        "kOoCgOW19G3uFtog5qSDQJuJjuJS8b3+kFz/qUK01XbZe8pl48m6AP7rHv8d2jZZwkOpRfnYJ9ZH"
+        "ym8IzgIw/e270Dt/6KJASkHEtsN0raDvbxA6CcBkl0zxvFDO6fV6+PXDT6w+o7r3Zz99OX/91/dP"
+        "pefYdjvf/vM3Tk5OrD6jwkQEpr5QYS0A052uQju/1+sBAI6OjvDH51/Mj197+Xz+mj/exJ27Kzi4"
+        "9XD+fm3nBn7+0Xwun+q+114+x2AwAIAgQrBZNeyyC5mVAGxuEDLF2+v1cHR0tHRcJQTdecCi89d2"
+        "biy8FkVgel3ZeYPBIKgIbOrdVATGAqDmfIas1eucBgBXfvkaB7ceYm3nxvwYe//nd79pP2t7P+oi"
+        "MBJADufzId+EpvDPO4kJAFiOALwAbK6pI1SXEEMEQQUQqt9vavVNmIwFXMcApk6X4RsNYowHGgWQ"
+        "uvX7Ol+FTBR37p6t4ZM538fZKkKJIFQUCCYAys6nRioRmPiO3LMAFawfbRNtELM2AtTWHw8qUSD7"
+        "jCCgPOcD/0cH9k0nJyQEUMmHtwBKntSZk1B7CSkFkOrXLUoM/4wU3QDzn0ootQsonCqAwql5gIi0"
+        "oWtrjQDaUJltpHYBhVMFUDjZBXByctLK/j0EoSaL+OAtgFIXd+Ym1NTx7BGgkhcSAiixG6AQ/gHF"
+        "42CXxQaxHwm3USC6sqSaFQTo/XlediLvRCq/eF3zAPaY+HOpCxBbsGmLDjEYLKErSN36m/w5F8Cr"
+        "tU2lszeOZ1aPHasI5IScFdyEqT+tUsFNY4NLB4+DLG3mRdCF0B9yqRhgvk7QBCsBmIwNmAhMdwJV"
+        "wSprMBi0WgQpVgbJ+nrTaLHwLUAVNlTO3OsPG9Xougcgv29AWyeNiM532RcBaO73ffy2NAgUldO0"
+        "Dr4p7Jgqke2Vw/74ymJdQlvGBsxW0fmq8uloqj9dXy/7vPh+oQtQTR9yCeX8eMC3OwAWuwSA5tgg"
+        "dF/v+4PS7PeIddeRjgH4k3wGdaFFACwLAcgrBt6OkJm9kL8m7rU0DND3MSEzha59JD+xMoUYXJ1u"
+        "Wj6XTJ+rf6xWB8tGmTbqjLFljIhslq2PKGTjjlg5fNdW7+Mfpx1CbA1UXSPVWgKfqdepHtiECPku"
+        "/om2R5DJNRglLyoRR+Uh6jXaHkHijRghFAuUJYRQjk++S5jsxr6j1JKEELLFA5n2CYxFl4UQ2vGh"
+        "ICUAhiz30EYxyLJ4VBzPICkAhioJRVkMqtQtNcczSAuApykjmUMUTXl6qk7naY0AeGy3nffFZiJG"
+        "G5zO00oByEi5xz6jbc6W0RkBqAghjC44WkXnBVDRQ2JhSCUfVQCFUwVQOFUAhVMFUDhVAIVTBVA4"
+        "VQCFUwVQOFUAhfMfnFGIGtdHBj8AAAAASUVORK5CYII="
+    )
+    try:
+        _logo_data = base64.b64decode(_LOGO_B64)
+        _logo_pil  = Image.open(io.BytesIO(_logo_data))
+        _logo_pil.load()  # force full decode before resize
+        _logo_pil  = _logo_pil.convert("RGBA")
+        _logo_pil  = _logo_pil.resize((52, 52), Image.LANCZOS)
+        _logo_photo = ImageTk.PhotoImage(_logo_pil)
+        _logo_lbl = tk.Label(_body, image=_logo_photo, bg="#0a0a0a")
+        _logo_lbl.image = _logo_photo  # prevent GC
+        _logo_lbl.pack(pady=(12, 4))
+    except Exception as _logo_err:
+        print(f"[Splash] Logo failed: {_logo_err}")  # debug — shows in console
+
     # App name row
     _name_row = tk.Frame(_body, bg="#0a0a0a")
     _name_row.pack(expand=True)
-    tk.Label(_name_row, text="HWInfo", fg="white",   bg="#0a0a0a",
+    tk.Label(_name_row, text="Hardware", fg="white",   bg="#0a0a0a",
              font=("Segoe UI", 28, "bold")).pack(side="left")
-    tk.Label(_name_row, text=" Monitor", fg="#e63946", bg="#0a0a0a",
+    tk.Label(_name_row, text="Toad", fg="#e63946", bg="#0a0a0a",
              font=("Segoe UI", 28, "bold")).pack(side="left")
 
     # Version badge
@@ -1246,7 +1303,7 @@ def main():
     # MAIN WINDOW — single window, MSI Center style with top tabs
     # ══════════════════════════════════════════════════════════════════════════
     root = tk.Tk()
-    root.title(f"HWInfo Monitor {APP_VERSION}")
+    root.title(f"HardwareToad {APP_VERSION}")
     root.configure(bg=BG)
     root.resizable(True, True)
     root.minsize(900, 700)
@@ -1262,9 +1319,9 @@ def main():
     # Left: branding
     brand = tk.Frame(header_bar, bg="#0f0f0f")
     brand.pack(side="left", padx=(16, 0), pady=8)
-    tk.Label(brand, text="HWInfo", fg="white", bg="#0f0f0f",
+    tk.Label(brand, text="Hardware", fg="white", bg="#0f0f0f",
              font=("Segoe UI", 15, "bold")).pack(side="left")
-    tk.Label(brand, text=" Monitor", fg=ACCENT_CPU, bg="#0f0f0f",
+    tk.Label(brand, text="Toad", fg=ACCENT_CPU, bg="#0f0f0f",
              font=("Segoe UI", 15, "bold")).pack(side="left")
 
     # Tab buttons — MSI Center style

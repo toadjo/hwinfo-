@@ -1,4 +1,4 @@
-# hwinfo_monitor.spec
+# hardware_toad.spec
 block_cipher = None
 
 a = Analysis(
@@ -25,7 +25,7 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name='HWInfoMonitor',
+    name='HardwareToad',
     debug=False,
     strip=False,
     upx=True,
@@ -36,5 +36,5 @@ exe = EXE(
 coll = COLLECT(
     exe, a.binaries, a.zipfiles, a.datas,
     strip=False, upx=True, upx_exclude=[],
-    name='HWInfoMonitor',
+    name='HardwareToad',
 )

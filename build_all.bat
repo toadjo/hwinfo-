@@ -1,10 +1,10 @@
 @echo off
-:: build_all.bat — HWInfo Monitor v0.7.2 Beta
-title HWInfo Monitor - Build Script
+:: build_all.bat — HardwareToad v0.7.2 Beta
+title HardwareToad - Build Script
 cd /d "%~dp0"
 
 :: ── Clear stale registry settings ────────────────────────────────────────────
-reg delete "HKCU\Software\HWInfoMonitor" /f >nul 2>&1
+reg delete "HKCU\Software\HardwareToad" /f >nul 2>&1
 
 :: ── Find Python ───────────────────────────────────────────────────────────────
 set PYTHON=
@@ -51,7 +51,7 @@ if exist .pyinstaller rmdir /s /q .pyinstaller
 for /d /r "%~dp0" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D"
 for /r "%~dp0" %%F in (*.pyc) do @if exist "%%F" del /f /q "%%F" >nul 2>&1
 for /r "%~dp0" %%F in (*.pyo) do @if exist "%%F" del /f /q "%%F" >nul 2>&1
-taskkill /f /im HWInfoMonitor.exe >nul 2>&1
+taskkill /f /im HardwareToad.exe >nul 2>&1
 taskkill /f /im LHMBridge.exe >nul 2>&1
 echo Done.
 
@@ -76,7 +76,7 @@ echo Done.
 
 :: ── Build EXE ────────────────────────────────────────────────────────────────
 echo [3/5] Building EXE with PyInstaller...
-%PYTHON% -m PyInstaller hwinfo_monitor.spec --noconfirm --clean
+%PYTHON% -m PyInstaller hardware_toad.spec --noconfirm --clean
 if errorlevel 1 (
     echo ERROR: PyInstaller failed
     pause & exit /b 1
@@ -85,7 +85,7 @@ echo Done.
 
 :: ── Verify version ───────────────────────────────────────────────────────────
 echo [4/5] Verifying build...
-set "VERSION_FILE=%TEMP%\hwinfo_monitor_version.txt"
+set "VERSION_FILE=%TEMP%\hardwaretoad_version.txt"
 %PYTHON% -c "from core.constants import APP_VERSION; print(APP_VERSION)" > "%VERSION_FILE%"
 set /p RAW_APP_VERSION=<"%VERSION_FILE%"
 del /f /q "%VERSION_FILE%" >nul 2>&1
@@ -104,7 +104,7 @@ if exist "C:\Program Files\Inno Setup 6\ISCC.exe" set ISCC=C:\Program Files\Inno
 if not defined ISCC (
     echo [5/5] Inno Setup not found - skipping installer
     echo.
-    echo BUILD COMPLETE - dist\HWInfoMonitor\HWInfoMonitor.exe
+    echo BUILD COMPLETE - dist\HardwareToad\HardwareToad.exe
     pause & exit /b 0
 )
 

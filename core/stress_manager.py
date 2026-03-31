@@ -1,4 +1,4 @@
-# stress_manager.py — HWInfo Monitor v0.5.9 Beta
+# stress_manager.py — HWInfo Monitor v0.5.10 Beta
 import queue
 import threading
 import time
@@ -36,7 +36,7 @@ class StressManager:
         "gpu_combined": "combined",
     }
 
-    def _get(self, path, timeout=2):
+    def _get(self, path, timeout=4):
         try:
             with urllib.request.urlopen(f"{self._base}{path}", timeout=timeout) as r:
                 return r.read().decode()
