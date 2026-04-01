@@ -34,4 +34,4 @@ BRIDGE_PORT    = 8086
 GRAPH_SECONDS  = 60
 
 # ── Update checker ────────────────────────────────────────────────────────────
-VERSION_CHECK_URL = "https://raw.githubusercontent.com/toadjo/hwinfo-/main/version.json"
+VERSION_CHECK_URL = "https://raw.githubusercontent.com/toadjo/HardwareToad/main/version.json"

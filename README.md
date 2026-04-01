@@ -18,8 +18,8 @@ Windows hardware monitor with a Python/Tkinter UI and a self-contained .NET brid
 ## Quick Start
 
 ```bat
-git clone https://github.com/toadjo/hwinfo-
-cd hwinfo-
+git clone https://github.com/toadjo/HardwareToad
+cd HardwareToad
 pip install -r requirements.txt
 dev.bat
 ```

@@ -1,1 +1,1 @@
-"""Core modules for HWInfo Monitor.""" 
+"""Core modules for HardwareToad."""

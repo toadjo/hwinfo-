@@ -1630,7 +1630,7 @@ def main():
         import urllib.request as _ur
         def _fetch():
             try:
-                url = "https://raw.githubusercontent.com/toadjo/hwinfo-/main/version.json"
+                url = "https://raw.githubusercontent.com/toadjo/HardwareToad/main/version.json"
                 r = _ur.urlopen(url, timeout=5)
                 data = _uj.loads(r.read())
                 remote = data.get("version", "")
@@ -1640,7 +1640,7 @@ def main():
                     try: return tuple(int(x) for x in v.split("."))
                     except: return (0,)
                 if _parse(remote_clean) > _parse(local):
-                    dl_url = data.get("download_url", "https://github.com/toadjo/hwinfo-/releases/latest")
+                    dl_url = data.get("download_url", "https://github.com/toadjo/HardwareToad/releases/latest")
                     log    = data.get("changelog", "")
                     def _show():
                         try:
