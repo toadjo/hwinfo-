@@ -14,7 +14,7 @@ from tkinter import ttk
 from PIL import Image, ImageDraw, ImageTk
 import psutil
 
-from .bridge import BridgeManager
+from .bridge import BridgeManager, get_bridge_token
 from .constants import (
     ACCENT_CPU, ACCENT_DISK, ACCENT_FAN, ACCENT_GPU,
     ACCENT_NET, ACCENT_RAM, ACCENT_SYS, ACCENT_STRESS,
@@ -3000,75 +3000,6 @@ def main():
         _tabs["cpu"]["active"].place_forget()
         _tabs["cpu"]["ram_active"].place(relx=0, rely=0, relwidth=1, relheight=1)
 
-    def _ram_poll():
-        if not _ram_running[0]:
-            return
-        try:
-            import urllib.request as _ur, json as _j
-            r = _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/status", timeout=2)
-            d = _j.loads(r.read())
-        except Exception:
-            root.after(800, _ram_poll)
-            return
-        phase  = d.get("phase", "idle")
-        cur    = d.get("current_test", 0)
-        total  = d.get("total_tests", 15)
-        name   = d.get("current_name", "")
-        errors = d.get("total_errors", 0)
-        log    = d.get("log", [])
-        for line in log[_ram_log_seen[0]:]:
-            _ram_write(line)
-        _ram_log_seen[0] = len(log)
-        if phase == "running":
-            ram_progress_lbl.config(
-                text=f"Test {cur} of {total}  —  {name}"
-                     + (f"  ·  {errors} errors" if errors else ""))
-        elif phase in ("done", "stopped", "idle"):
-            result = "✓ No errors" if errors == 0 else f"✗ {errors} errors"
-            ram_progress_lbl.config(
-                text=f"{'Done' if phase == 'done' else 'Stopped'}  ·  {result}")
-            ram_stop_btn.config(state="disabled")
-            _ram_running[0] = False
-            return
-        root.after(800, _ram_poll)
-
-    def _ram_start():
-        try:
-            import urllib.request as _ur
-            mb = _ram_size_mb[0]
-            url = f"http://127.0.0.1:{bridge.port}/ram/start"
-            if mb > 0:
-                url += f"?mb={mb}"
-            _ur.urlopen(url, timeout=2)
-        except Exception:
-            return
-        ram_log.config(state="normal")
-        ram_log.delete("1.0", "end")
-        ram_log.config(state="disabled")
-        _ram_log_seen[0] = 0
-        _ram_running[0]  = True
-        size_label = f"{_ram_size_mb[0]} MB" if _ram_size_mb[0] > 0 else "Auto"
-        ram_progress_lbl.config(text=f"Starting… ({size_label})")
-        ram_stop_btn.config(state="normal")
-        _show_ram_active()
-        root.after(800, _ram_poll)
-
-    def _ram_stop():
-        try:
-            import urllib.request as _ur
-            _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/stop", timeout=2)
-        except Exception:
-            pass
-
-    ram_stop_btn.config(command=_ram_stop)
-
-    _ram_click_widgets = [ram_card] + [
-        w for w in ram_card.winfo_children()
-        if w is not ram_size_frame
-    ]
-    for w in _ram_click_widgets:
-        w.bind("<Button-1>", lambda e: _ram_start())
-
     # Show the menu initially
     _tabs["cpu"]["menu"].place(relx=0, rely=0, relwidth=1, relheight=1)
 
@@ -3077,7 +3008,7 @@ def main():
             return
         try:
             import urllib.request as _ur, json as _j
-            r = _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/status", timeout=2)
+            r = _ur.urlopen(_ur.Request(f"http://127.0.0.1:{bridge.port}/ram/status", headers={"X-HardwareToad-Token": get_bridge_token()}), timeout=2)
             d = _j.loads(r.read())
         except Exception:
             root.after(800, _ram_poll)
@@ -3111,7 +3042,7 @@ def main():
             url = f"http://127.0.0.1:{bridge.port}/ram/start"
             if mb > 0:
                 url += f"?mb={mb}"
-            _ur.urlopen(url, timeout=2)
+            _ur.urlopen(_ur.Request(url, headers={"X-HardwareToad-Token": get_bridge_token()}), timeout=2)
         except Exception:
             return
         ram_log.config(state="normal")
@@ -3128,7 +3059,7 @@ def main():
     def _ram_stop():
         try:
             import urllib.request as _ur
-            _ur.urlopen(f"http://127.0.0.1:{bridge.port}/ram/stop", timeout=2)
+            _ur.urlopen(_ur.Request(f"http://127.0.0.1:{bridge.port}/ram/stop", headers={"X-HardwareToad-Token": get_bridge_token()}), timeout=2)
         except Exception:
             pass
 

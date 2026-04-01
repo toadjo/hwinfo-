@@ -18,6 +18,12 @@ All notable changes to HardwareToad will be documented here.
 - **Window/taskbar icon** — `root.iconphoto()` set from the same base64-embedded robot toad logo used in the splash screen; provided at 256px (taskbar) and 32px (title bar); no external file dependency
 
 ### Changed
+- **Token passed via environment variable** — `_BRIDGE_TOKEN` is now set as `HARDWARETOAD_TOKEN` env var on the child process instead of `--token=<hex>` CLI arg; CLI args are visible to any local process via Task Manager / WMI `Win32_Process`, env vars are per-process and not trivially enumerable; elevated (ShellExecute RunAs) launch writes token to a temp file that the bridge reads and deletes on startup (`--token-file=`); `--token=` kept as last-resort fallback for dev mode
+- **`bridge.py` integrity check fails closed** — `_verify_bridge_integrity()` now returns `False` on I/O exceptions instead of `True`; a bridge binary that can't be hashed is treated as suspect rather than trusted
+- **`stress_manager.py` HTTP calls authenticated** — `_get()` now creates a `urllib.request.Request` with `X-HardwareToad-Token` header on every call; previously stress endpoints (`/stress/start`, `/stress/stop`, `/stress/status`) were called without auth, allowing any local process to trigger CPU stress tests
+- **`app.py` inline RAM HTTP calls authenticated** — all `urlopen()` calls to `/ram/start`, `/ram/stop`, `/ram/status` now use `Request()` with auth header via `get_bridge_token()`
+- **`LHMBridge.cs` token loading order** — reads `HARDWARETOAD_TOKEN` env var first → `--token-file=` second (reads + deletes) → `--token=` last; `System.IO` added to usings
+- **Duplicate `_ram_poll`/`_ram_start`/`_ram_stop` blocks removed** — first block (dead code, shadowed by identical second definition) deleted from `app.py`; ~69 lines of unreachable code removed
 - **`bridge.py` HTTP calls unified via `_make_request()`** — all `urlopen()` calls replaced with a single helper that injects `X-HardwareToad-Token` header automatically; affects `/sensors`, `/cpu-temp`, `/timings`, `/mobo`, `/ready`, and `/ram/*` endpoints
 - **`ring_pair()` and `single_ring()` anchor** changed from `"center"` to `"w"` so gauge rings align to the left edge consistently across CPU, GPU, and RAM blocks
 - **`stat_strip()` anchor** changed from `"center"` to `"w"` so stat labels (CLOCK, POWER, VOLTAGE etc.) align with ring left edge instead of floating center
@@ -31,6 +37,8 @@ All notable changes to HardwareToad will be documented here.
 - **`LinpackDgemm` upgraded** — matrix dimension N 2048→3072 (3.4× more FMAs per pass: 17B→58B FP64 ops); tile size 64→96; 3 matrices × 226MB per thread; reveals instability that smaller workloads miss
 
 ### Fixed
+- **Single-core stress test stressing all cores** — `req.Url?.AbsolutePath` in LHMBridge HTTP handler strips query strings, so `/stress/start?mode=cpu_single` arrived as just `"start"` with no mode param, defaulting to `cpu_multi` (all cores); fixed by using `req.Url?.PathAndQuery` for `/stress/` and `/ram/` route handlers; this also fixes the RAM test `?mb=` size parameter being silently dropped
+- **Linpack DGEMM showing 0.00B iters/s** — iteration counter was only updated after a full N×N×N pass (~58B FMAs), which takes longer than the 2s poll interval; moved `Interlocked.Add` from end-of-pass to per-tile-row (every 96 rows), so the poll sees smooth incremental progress; total count per pass unchanged (N/TILE × 2×TILE×N×N = 2×N³)
 - **Installer error code 740** — `CreateProcess` failure on post-install launch caused by `runasoriginaluser` trying to spawn an admin-manifest exe as a non-elevated user; `shellexec` flag delegates launch to Windows ShellExecute which respects the `requireAdministrator` manifest correctly
 - **Obfuscar XML parse failure** — double-dash sequences (`--`) inside XML comments are illegal per the XML spec and caused `System.Xml.XmlException`; all comments removed from `obfuscar.xml`
 - **LHMBridge.cs brace mismatch** — orphaned sink/scalar-fallback code left after `AvxFmaBurn` refactor caused CS1001/CS1519 compile errors; removed stale block and restored correct brace balance

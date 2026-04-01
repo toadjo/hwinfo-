@@ -7,6 +7,7 @@ import urllib.parse
 import json
 
 from .constants import BRIDGE_PORT
+from .bridge import get_bridge_token
 
 
 class StressManager:
@@ -35,7 +36,11 @@ class StressManager:
 
     def _get(self, path, timeout=2):
         try:
-            with urllib.request.urlopen(f"{self._base}{path}", timeout=timeout) as r:
+            req = urllib.request.Request(
+                f"{self._base}{path}",
+                headers={"X-HardwareToad-Token": get_bridge_token()},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read().decode()
         except Exception as e:
             safe = str(e).replace('\\', '\\\\').replace('"', '\\"')

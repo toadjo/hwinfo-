@@ -18,6 +18,11 @@ from .paths import get_base_path
 _BRIDGE_TOKEN = secrets.token_hex(32)   # 256-bit random token
 
 
+def get_bridge_token() -> str:
+    """Public accessor so stress_manager and app.py can inject the auth header."""
+    return _BRIDGE_TOKEN
+
+
 def _is_admin() -> bool:
     """Return True if the current process has administrator privileges."""
     try:
@@ -104,8 +109,8 @@ class BridgeManager:
                 return False
             return True
         except Exception:
-            # If we can't read the file, let it through (don't block on I/O errors)
-            return True
+            # Fail closed — if we can't verify, don't trust it
+            return False
 
     @property
     def data(self):
@@ -142,13 +147,26 @@ class BridgeManager:
         Used as fallback when the current process is NOT admin.
         Because ShellExecuteW spawns an independent process we can't hold a
         Popen handle — we just wait for /ready instead.
+
+        The auth token is written to a temp file (not CLI args, which are
+        visible to all local processes via WMI). The bridge reads and deletes
+        the file on startup.
         Returns True if the bridge becomes reachable within ~15 s.
         """
+        # Write token to temp file — bridge reads & deletes it at startup
+        import tempfile
+        token_file = os.path.join(tempfile.gettempdir(), "hardwaretoad_token.tmp")
+        try:
+            with open(token_file, "w") as f:
+                f.write(_BRIDGE_TOKEN)
+        except Exception:
+            pass
+
         ret = ctypes.windll.shell32.ShellExecuteW(
             None,
             "runas",
             path,
-            f"--port={self.port}",
+            f"--port={self.port} --token-file=\"{token_file}\"",
             None,
             0,  # SW_HIDE
         )
@@ -204,7 +222,9 @@ class BridgeManager:
         # However, if the parent IS admin we launch normally (inherits perms).
         # If the parent is NOT admin and ShellExecute fails, we fall back to
         # a direct Popen (bridge will run without ring0 — sensors may be N/A).
-        bridge_args = [path, f"--port={self.port}", f"--token={_BRIDGE_TOKEN}"]
+        bridge_args = [path, f"--port={self.port}"]
+        bridge_env = os.environ.copy()
+        bridge_env["HARDWARETOAD_TOKEN"] = _BRIDGE_TOKEN
         launched = False
         try:
             if _is_admin():
@@ -216,6 +236,7 @@ class BridgeManager:
                     stderr=subprocess.DEVNULL,
                     startupinfo=si,
                     creationflags=creationflags,
+                    env=bridge_env,
                 )
                 launched = True
             else:
@@ -237,6 +258,7 @@ class BridgeManager:
                     stderr=subprocess.DEVNULL,
                     startupinfo=si,
                     creationflags=creationflags,
+                    env=bridge_env,
                 )
             except Exception:
                 return False

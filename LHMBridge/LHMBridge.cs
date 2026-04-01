@@ -6,6 +6,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -60,8 +61,35 @@ class LHMBridge
                 port = p;
             if (a == "--debug")
                 debugMode = true;
-            if (a.StartsWith("--token="))
-                _authToken = a[8..];
+        }
+
+        // Read auth token from environment (not CLI — CLI args are visible to all local processes)
+        _authToken = Environment.GetEnvironmentVariable("HARDWARETOAD_TOKEN") ?? "";
+        if (string.IsNullOrEmpty(_authToken))
+        {
+            // Fallback: read from temp file (used by elevated ShellExecute launch)
+            foreach (var a in args)
+                if (a.StartsWith("--token-file="))
+                {
+                    string tokenPath = a[13..].Trim('"');
+                    try
+                    {
+                        _authToken = File.ReadAllText(tokenPath).Trim();
+                        File.Delete(tokenPath);  // one-time read, then destroy
+                        DbgLog($"Token loaded from file and deleted: {tokenPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        DbgLog($"Failed to read token file: {ex.Message}");
+                    }
+                }
+        }
+        if (string.IsNullOrEmpty(_authToken))
+        {
+            // Last fallback: --token= for backward compat / dev mode
+            foreach (var a in args)
+                if (a.StartsWith("--token="))
+                    _authToken = a[8..];
         }
 
         if (string.IsNullOrEmpty(_authToken))
@@ -350,6 +378,7 @@ class LHMBridge
                     res.Headers.Add("Access-Control-Allow-Origin", origin);
 
                 string path = req.Url?.AbsolutePath ?? "";
+                string pathAndQuery = req.Url?.PathAndQuery ?? path;
                 byte[] buf;
 
                 if (path == "/sensors")
@@ -405,14 +434,14 @@ class LHMBridge
                 }
                 else if (path.StartsWith("/ram/"))
                 {
-                    string action = path[5..];
+                    string action = pathAndQuery[5..];
                     string result = RamTester.HandleCommand(action);
                     buf = Encoding.UTF8.GetBytes(result);
                     res.ContentType = "application/json";
                 }
                 else if (path.StartsWith("/stress/"))
                 {
-                    string action = path[8..];
+                    string action = pathAndQuery[8..];
                     string result = StressBurner.HandleCommand(action);
                     buf = Encoding.UTF8.GetBytes(result);
                     res.ContentType = "application/json";
@@ -1282,56 +1311,59 @@ static class StressBurner
                 new Span<double>(C, N * N).Fill(0.0);
 
                 for (int ii = 0; ii < N && !token.IsCancellationRequested; ii += TILE)
-                for (int kk = 0; kk < N; kk += TILE)
                 {
-                    int iMax = Math.Min(ii + TILE, N);
-                    int kMax = Math.Min(kk + TILE, N);
-
-                    for (int jj = 0; jj < N; jj += TILE)
+                    for (int kk = 0; kk < N; kk += TILE)
                     {
-                        int jMax = Math.Min(jj + TILE, N);
+                        int iMax = Math.Min(ii + TILE, N);
+                        int kMax = Math.Min(kk + TILE, N);
 
-                        // ── Inner kernel: C[i,j] += A[i,k] * B[k,j] ─────────
-                        for (int i = ii; i < iMax; i++)
+                        for (int jj = 0; jj < N; jj += TILE)
                         {
-                            double* Ci = C + i * N;
-                            double* Ai = A + i * N;
+                            int jMax = Math.Min(jj + TILE, N);
 
-                            for (int k = kk; k < kMax; k++)
+                            // ── Inner kernel: C[i,j] += A[i,k] * B[k,j] ─────────
+                            for (int i = ii; i < iMax; i++)
                             {
-                                double aik = Ai[k];
-                                double* Bk = B + k * N;
+                                double* Ci = C + i * N;
+                                double* Ai = A + i * N;
 
-                                if (Avx2.IsSupported)
+                                for (int k = kk; k < kMax; k++)
                                 {
-                                    // AVX2: process 4 doubles per instruction
-                                    var vaik = Vector256.Create(aik);
-                                    int j = jj;
-                                    for (; j <= jMax - 4; j += 4)
+                                    double aik = Ai[k];
+                                    double* Bk = B + k * N;
+
+                                    if (Avx2.IsSupported)
                                     {
-                                        var vc  = Avx.LoadVector256(Ci + j);
-                                        var vb  = Avx.LoadVector256(Bk + j);
-                                        var res = Fma.IsSupported
-                                            ? Fma.MultiplyAdd(vaik, vb, vc)
-                                            : Avx.Add(vc, Avx.Multiply(vaik, vb));
-                                        Avx.Store(Ci + j, res);
+                                        // AVX2: process 4 doubles per instruction
+                                        var vaik = Vector256.Create(aik);
+                                        int j = jj;
+                                        for (; j <= jMax - 4; j += 4)
+                                        {
+                                            var vc  = Avx.LoadVector256(Ci + j);
+                                            var vb  = Avx.LoadVector256(Bk + j);
+                                            var res = Fma.IsSupported
+                                                ? Fma.MultiplyAdd(vaik, vb, vc)
+                                                : Avx.Add(vc, Avx.Multiply(vaik, vb));
+                                            Avx.Store(Ci + j, res);
+                                        }
+                                        // Scalar tail
+                                        for (; j < jMax; j++)
+                                            Ci[j] += aik * Bk[j];
                                     }
-                                    // Scalar tail
-                                    for (; j < jMax; j++)
-                                        Ci[j] += aik * Bk[j];
-                                }
-                                else
-                                {
-                                    for (int j = jj; j < jMax; j++)
-                                        Ci[j] += aik * Bk[j];
+                                    else
+                                    {
+                                        for (int j = jj; j < jMax; j++)
+                                            Ci[j] += aik * Bk[j];
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Count FMAs: 2 × N³ per full DGEMM pass
-                Interlocked.Add(ref _totalIters, 2L * N * N * N);
+                    // Count FMAs per tile-row: 2 × TILE × N × N
+                    // (N/TILE tile-rows per pass, so total still = 2 × N³)
+                    Interlocked.Add(ref _totalIters, 2L * TILE * N * N);
+                }
 
                 // Sink one result element to prevent dead-code elimination
                 Sink(C[N / 2 * N + N / 2]);
