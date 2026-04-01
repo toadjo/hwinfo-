@@ -31,7 +31,7 @@ exe = EXE(
     upx=True,
     console=False,
     uac_admin=True,
-    icon=None,
+    icon='assets\\logo.ico',
 )
 coll = COLLECT(
     exe, a.binaries, a.zipfiles, a.datas,

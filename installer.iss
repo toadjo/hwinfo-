@@ -17,6 +17,7 @@ DefaultDirName={autopf64}\{#AppName}
 DefaultGroupName={#AppName}
 OutputDir=output
 OutputBaseFilename=HardwareToad_Setup
+SetupIconFile=assets\logo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -40,21 +41,14 @@ Source: "dist\HardwareToad\_internal\*"; DestDir: "{app}\_internal"; Flags: igno
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\{#AppExeName}"; ValueData: "RUNASADMIN"; Flags: uninsdeletevalue
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-; Launch with explicit RunAs so UAC prompt appears immediately — no "access denied" surprise
-Filename: "{cmd}"; Parameters: "/c start """" /wait ""{app}\{#AppExeName}"""; \
-  Description: "Launch {#AppName} (requires Administrator)"; \
-  Flags: nowait postinstall skipifsilent runascurrentuser; \
-  Check: not IsAdminInstallMode
-
 Filename: "{app}\{#AppExeName}"; \
-  Description: "Launch {#AppName} (requires Administrator)"; \
-  Flags: nowait postinstall skipifsilent runasoriginaluser; \
-  Check: IsAdminInstallMode
+  Description: "Launch {#AppName}"; \
+  Flags: nowait postinstall skipifsilent shellexec;
 
 [Code]
 

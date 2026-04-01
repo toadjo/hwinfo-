@@ -1,5 +1,5 @@
 // LHMBridge.cs — Sensor bridge with real AMD memory timing support
-// HWInfo Monitor v0.7.4 Beta
+// HardwareToad v0.7.5 Beta
 // Uses LibreHardwareMonitor for all sensors + ZenStates-Core for AMD UMC timings
 // Run as Administrator (required for ring0 access)
 // Pass --debug to enable verbose sensor diagnostic logging
@@ -21,6 +21,7 @@ class LHMBridge
     static Computer?   computer;
     static bool        ready            = false;
     static bool        debugMode        = false;
+    static string      _authToken       = "";          // shared secret set via --token=
     static string      _cachedJson      = "{}";
     static string      _cachedCpuTemp   = "null";
     static string      _cachedTimings   = "{}";
@@ -59,7 +60,12 @@ class LHMBridge
                 port = p;
             if (a == "--debug")
                 debugMode = true;
+            if (a.StartsWith("--token="))
+                _authToken = a[8..];
         }
+
+        if (string.IsNullOrEmpty(_authToken))
+            Console.Error.WriteLine("WARNING: No --token provided — all requests will be accepted (dev mode).");
 
         if (debugMode)
             Console.WriteLine("=== LHMBridge DEBUG MODE ===");
@@ -324,7 +330,24 @@ class LHMBridge
                 var ctx = listener.GetContext();
                 var req = ctx.Request;
                 var res = ctx.Response;
-                res.Headers.Add("Access-Control-Allow-Origin", "*");
+
+                // ── Token auth — reject if token is set and header doesn't match ──
+                if (!string.IsNullOrEmpty(_authToken))
+                {
+                    string? incoming = req.Headers["X-HardwareToad-Token"];
+                    if (incoming != _authToken)
+                    {
+                        res.StatusCode = 403;
+                        res.ContentLength64 = 0;
+                        res.OutputStream.Close();
+                        continue;
+                    }
+                }
+
+                // ── Restrict CORS to localhost only ───────────────────────────────
+                string? origin = req.Headers["Origin"];
+                if (origin != null && (origin.StartsWith("http://127.0.0.1") || origin.StartsWith("http://localhost")))
+                    res.Headers.Add("Access-Control-Allow-Origin", origin);
 
                 string path = req.Url?.AbsolutePath ?? "";
                 byte[] buf;
@@ -811,54 +834,67 @@ static class StressBurner
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void SinkF(float v) { }
 
-    // ── AVX2 FMA burn — maximum thermal output ────────────────────────────────
-    // Uses FP32 (float) instead of FP64 (double):
-    //   - Vector256<float> = 8 floats vs 4 doubles per register
-    //   - FP32 FMA throughput is 2x FP64 on all modern x86 CPUs
-    //   - 24 independent chains × 8 floats = 192 FMA ops per inner iteration
-    //   - Fills all FP execution ports simultaneously → maximum power draw
-    // This is equivalent to what Prime95 Small FFT achieves thermally.
+    // ── AVX2 FMA burn — MAXIMUM thermal output ────────────────────────────────
+    // FP32 + FP64 dual-port: forces both FP execution units simultaneously
+    //   - 16 FP32 chains × 8 floats  = 128 FP32 FMAs per inner iter
+    //   - 16 FP64 chains × 4 doubles = 64  FP64 FMAs per inner iter
+    //   - 1000-unrolled inner loop = 192000 FP ops per outer iter
+    //   - Fills ALL YMM registers (ymm0–ymm15) — no spills, max register pressure
+    //   - Equivalent to Prime95 Small FFT but higher sustained power on Zen4/Raptor Lake
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void AvxFmaBurn(CancellationToken token)
     {
         if (Fma.IsSupported && Avx.IsSupported)
         {
-            // 24 independent chains × 8 floats = 192 FP32 FMAs per inner iter
-            // Independent chains = no data dependency stalls = max FP throughput
-            var a = Vector256.Create(1.10f, 1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f);
-            var b = Vector256.Create(1.20f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f, 1.26f, 1.27f);
-            var c = Vector256.Create(1.30f, 1.31f, 1.32f, 1.33f, 1.34f, 1.35f, 1.36f, 1.37f);
-            var d = Vector256.Create(1.40f, 1.41f, 1.42f, 1.43f, 1.44f, 1.45f, 1.46f, 1.47f);
-            var e = Vector256.Create(1.50f, 1.51f, 1.52f, 1.53f, 1.54f, 1.55f, 1.56f, 1.57f);
-            var f = Vector256.Create(1.60f, 1.61f, 1.62f, 1.63f, 1.64f, 1.65f, 1.66f, 1.67f);
-            var g = Vector256.Create(0.90f, 0.91f, 0.92f, 0.93f, 0.94f, 0.95f, 0.96f, 0.97f);
-            var h = Vector256.Create(0.80f, 0.81f, 0.82f, 0.83f, 0.84f, 0.85f, 0.86f, 0.87f);
-            var i = Vector256.Create(0.70f, 0.71f, 0.72f, 0.73f, 0.74f, 0.75f, 0.76f, 0.77f);
-            var j = Vector256.Create(0.60f, 0.61f, 0.62f, 0.63f, 0.64f, 0.65f, 0.66f, 0.67f);
-            var k = Vector256.Create(1.70f, 1.71f, 1.72f, 1.73f, 1.74f, 1.75f, 1.76f, 1.77f);
-            var l = Vector256.Create(1.80f, 1.81f, 1.82f, 1.83f, 1.84f, 1.85f, 1.86f, 1.87f);
-            var m = Vector256.Create(1.90f, 1.91f, 1.92f, 1.93f, 1.94f, 1.95f, 1.96f, 1.97f);
-            var n = Vector256.Create(0.50f, 0.51f, 0.52f, 0.53f, 0.54f, 0.55f, 0.56f, 0.57f);
-            var o = Vector256.Create(0.40f, 0.41f, 0.42f, 0.43f, 0.44f, 0.45f, 0.46f, 0.47f);
-            var p = Vector256.Create(0.30f, 0.31f, 0.32f, 0.33f, 0.34f, 0.35f, 0.36f, 0.37f);
-            var q = Vector256.Create(2.00f, 2.01f, 2.02f, 2.03f, 2.04f, 2.05f, 2.06f, 2.07f);
-            var r = Vector256.Create(2.10f, 2.11f, 2.12f, 2.13f, 2.14f, 2.15f, 2.16f, 2.17f);
-            var s = Vector256.Create(0.20f, 0.21f, 0.22f, 0.23f, 0.24f, 0.25f, 0.26f, 0.27f);
-            var t2= Vector256.Create(0.10f, 0.11f, 0.12f, 0.13f, 0.14f, 0.15f, 0.16f, 0.17f);
-            var u = Vector256.Create(2.20f, 2.21f, 2.22f, 2.23f, 2.24f, 2.25f, 2.26f, 2.27f);
-            var v = Vector256.Create(2.30f, 2.31f, 2.32f, 2.33f, 2.34f, 2.35f, 2.36f, 2.37f);
-            var w = Vector256.Create(0.85f, 0.86f, 0.87f, 0.88f, 0.89f, 0.90f, 0.91f, 0.92f);
-            var x = Vector256.Create(0.75f, 0.76f, 0.77f, 0.78f, 0.79f, 0.80f, 0.81f, 0.82f);
+            // ── 16 FP32 chains (ymm0–ymm15) ────────────────────────────────
+            var a  = Vector256.Create(1.10f, 1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f);
+            var b  = Vector256.Create(1.20f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f, 1.26f, 1.27f);
+            var c  = Vector256.Create(1.30f, 1.31f, 1.32f, 1.33f, 1.34f, 1.35f, 1.36f, 1.37f);
+            var d  = Vector256.Create(1.40f, 1.41f, 1.42f, 1.43f, 1.44f, 1.45f, 1.46f, 1.47f);
+            var e  = Vector256.Create(1.50f, 1.51f, 1.52f, 1.53f, 1.54f, 1.55f, 1.56f, 1.57f);
+            var f  = Vector256.Create(1.60f, 1.61f, 1.62f, 1.63f, 1.64f, 1.65f, 1.66f, 1.67f);
+            var g  = Vector256.Create(0.90f, 0.91f, 0.92f, 0.93f, 0.94f, 0.95f, 0.96f, 0.97f);
+            var h  = Vector256.Create(0.80f, 0.81f, 0.82f, 0.83f, 0.84f, 0.85f, 0.86f, 0.87f);
+            var ii = Vector256.Create(0.70f, 0.71f, 0.72f, 0.73f, 0.74f, 0.75f, 0.76f, 0.77f);
+            var jj = Vector256.Create(0.60f, 0.61f, 0.62f, 0.63f, 0.64f, 0.65f, 0.66f, 0.67f);
+            var k  = Vector256.Create(1.70f, 1.71f, 1.72f, 1.73f, 1.74f, 1.75f, 1.76f, 1.77f);
+            var l  = Vector256.Create(1.80f, 1.81f, 1.82f, 1.83f, 1.84f, 1.85f, 1.86f, 1.87f);
+            var m  = Vector256.Create(1.90f, 1.91f, 1.92f, 1.93f, 1.94f, 1.95f, 1.96f, 1.97f);
+            var n  = Vector256.Create(0.50f, 0.51f, 0.52f, 0.53f, 0.54f, 0.55f, 0.56f, 0.57f);
+            var o  = Vector256.Create(0.40f, 0.41f, 0.42f, 0.43f, 0.44f, 0.45f, 0.46f, 0.47f);
+            var p  = Vector256.Create(0.30f, 0.31f, 0.32f, 0.33f, 0.34f, 0.35f, 0.36f, 0.37f);
 
-            var mulUp   = Vector256.Create(1.00000007f);
-            var mulDown = Vector256.Create(0.99999993f);
-            var addC    = Vector256.Create(0.00000001f);
+            // ── 16 FP64 chains — hits the other FP execution port simultaneously ──
+            var da = Vector256.Create(1.100000001, 1.110000001, 1.120000001, 1.130000001);
+            var db = Vector256.Create(1.200000002, 1.210000002, 1.220000002, 1.230000002);
+            var dc = Vector256.Create(0.900000003, 0.910000003, 0.920000003, 0.930000003);
+            var dd = Vector256.Create(0.800000004, 0.810000004, 0.820000004, 0.830000004);
+            var de = Vector256.Create(1.300000005, 1.310000005, 1.320000005, 1.330000005);
+            var df = Vector256.Create(0.700000006, 0.710000006, 0.720000006, 0.730000006);
+            var dg = Vector256.Create(1.400000007, 1.410000007, 1.420000007, 1.430000007);
+            var dh = Vector256.Create(0.600000008, 0.610000008, 0.620000008, 0.630000008);
+            var di = Vector256.Create(1.500000009, 1.510000009, 1.520000009, 1.530000009);
+            var dj = Vector256.Create(0.500000010, 0.510000010, 0.520000010, 0.530000010);
+            var dk = Vector256.Create(1.600000011, 1.610000011, 1.620000011, 1.630000011);
+            var dl = Vector256.Create(0.400000012, 0.410000012, 0.420000012, 0.430000012);
+            var dm = Vector256.Create(1.700000013, 1.710000013, 1.720000013, 1.730000013);
+            var dn = Vector256.Create(0.300000014, 0.310000014, 0.320000014, 0.330000014);
+            var doo= Vector256.Create(1.800000015, 1.810000015, 1.820000015, 1.830000015);
+            var dp = Vector256.Create(0.200000016, 0.210000016, 0.220000016, 0.230000016);
+
+            var mulUp    = Vector256.Create(1.00000007f);
+            var mulDown  = Vector256.Create(0.99999993f);
+            var addC     = Vector256.Create(0.00000001f);
+            var dmulUp   = Vector256.Create(1.000000007);
+            var dmulDown = Vector256.Create(0.999999993);
+            var daddC    = Vector256.Create(0.000000001);
 
             while (!token.IsCancellationRequested)
             {
-                // 500 unrolled × 24 chains × 8 floats = 96000 FP32 FMAs per outer iter
-                for (int nn = 0; nn < 500; nn++)
+                // 1000-unrolled × 16 FP32 chains + 16 FP64 chains
+                for (int nn = 0; nn < 1000; nn++)
                 {
+                    // FP32 chains
                     a  = Fma.MultiplyAdd(a,  mulUp,   addC);
                     b  = Fma.MultiplyAdd(b,  mulUp,   addC);
                     c  = Fma.MultiplyAdd(c,  mulUp,   addC);
@@ -867,158 +903,185 @@ static class StressBurner
                     f  = Fma.MultiplyAdd(f,  mulUp,   addC);
                     g  = Fma.MultiplyAdd(g,  mulDown, addC);
                     h  = Fma.MultiplyAdd(h,  mulDown, addC);
-                    i  = Fma.MultiplyAdd(i,  mulDown, addC);
-                    j  = Fma.MultiplyAdd(j,  mulDown, addC);
+                    ii = Fma.MultiplyAdd(ii, mulDown, addC);
+                    jj = Fma.MultiplyAdd(jj, mulDown, addC);
                     k  = Fma.MultiplyAdd(k,  mulUp,   addC);
                     l  = Fma.MultiplyAdd(l,  mulDown, addC);
                     m  = Fma.MultiplyAdd(m,  mulUp,   addC);
                     n  = Fma.MultiplyAdd(n,  mulDown, addC);
                     o  = Fma.MultiplyAdd(o,  mulDown, addC);
                     p  = Fma.MultiplyAdd(p,  mulDown, addC);
-                    q  = Fma.MultiplyAdd(q,  mulUp,   addC);
-                    r  = Fma.MultiplyAdd(r,  mulUp,   addC);
-                    s  = Fma.MultiplyAdd(s,  mulDown, addC);
-                    t2 = Fma.MultiplyAdd(t2, mulDown, addC);
-                    u  = Fma.MultiplyAdd(u,  mulUp,   addC);
-                    v  = Fma.MultiplyAdd(v,  mulUp,   addC);
-                    w  = Fma.MultiplyAdd(w,  mulDown, addC);
-                    x  = Fma.MultiplyAdd(x,  mulDown, addC);
+                    // FP64 chains (interleaved — both ports busy)
+                    da  = Fma.MultiplyAdd(da,  dmulUp,   daddC);
+                    db  = Fma.MultiplyAdd(db,  dmulUp,   daddC);
+                    dc  = Fma.MultiplyAdd(dc,  dmulDown, daddC);
+                    dd  = Fma.MultiplyAdd(dd,  dmulDown, daddC);
+                    de  = Fma.MultiplyAdd(de,  dmulUp,   daddC);
+                    df  = Fma.MultiplyAdd(df,  dmulDown, daddC);
+                    dg  = Fma.MultiplyAdd(dg,  dmulUp,   daddC);
+                    dh  = Fma.MultiplyAdd(dh,  dmulDown, daddC);
+                    di  = Fma.MultiplyAdd(di,  dmulUp,   daddC);
+                    dj  = Fma.MultiplyAdd(dj,  dmulDown, daddC);
+                    dk  = Fma.MultiplyAdd(dk,  dmulUp,   daddC);
+                    dl  = Fma.MultiplyAdd(dl,  dmulDown, daddC);
+                    dm  = Fma.MultiplyAdd(dm,  dmulUp,   daddC);
+                    dn  = Fma.MultiplyAdd(dn,  dmulDown, daddC);
+                    doo = Fma.MultiplyAdd(doo, dmulUp,   daddC);
+                    dp  = Fma.MultiplyAdd(dp,  dmulDown, daddC);
                 }
 
-                // Sink all 24 chains — JIT must keep every register alive
-                var sum1 = Avx.Add(Avx.Add(Avx.Add(a, b), Avx.Add(c, d)),
-                           Avx.Add(Avx.Add(Avx.Add(e, f), Avx.Add(g, h)),
-                           Avx.Add(Avx.Add(i, j), Avx.Add(k, l))));
-                var sum2 = Avx.Add(Avx.Add(Avx.Add(m, n), Avx.Add(o, p)),
-                           Avx.Add(Avx.Add(Avx.Add(q, r), Avx.Add(s, t2)),
-                           Avx.Add(Avx.Add(u, v), Avx.Add(w, x))));
-                SinkF(Avx.Add(sum1, sum2)[0]);
-
-                Interlocked.Add(ref _totalIters, 500 * 24);
+                // Sink all chains — force JIT to keep every register alive
+                SinkF(Avx.Add(Avx.Add(Avx.Add(a, b), Avx.Add(c, d)),
+                       Avx.Add(Avx.Add(e, f), Avx.Add(g, h)))[0]);
+                SinkF(Avx.Add(Avx.Add(ii, jj), Avx.Add(Avx.Add(k, l),
+                       Avx.Add(Avx.Add(m, n), Avx.Add(o, p))))[0]);
+                Sink(Avx.Add(Avx.Add(da, db), Avx.Add(dc, dd))[0]);
+                Sink(Avx.Add(Avx.Add(de, df), Avx.Add(dg, dh))[0]);
+                Sink(Avx.Add(Avx.Add(di, dj), Avx.Add(dk, dl))[0]);
+                Sink(Avx.Add(Avx.Add(dm, dn), Avx.Add(doo, dp))[0]);
+                Interlocked.Add(ref _totalIters, 1000 * (16 * 8 + 16 * 4));
             }
         }
         else
         {
-            // Scalar fallback — 16 independent chains, fills out-of-order pipeline
-            double a=1.1,b=1.2,c=1.3,d=1.4,e=1.5,f=1.6,g=1.7,h=1.8,
-                   i2=1.9,j=2.0,k=2.1,l=2.2,m=2.3,nn=2.4,o=2.5,p=2.6;
+            // Scalar fallback — 16 independent chains
+            double sa=1.1,sb=1.2,sc=1.3,sd=1.4,se=1.5,sf2=1.6,sg=0.9,sh=0.8,
+                   si=0.7,sj=0.6,sk=1.7,sl=1.8,sm=1.9,sn=0.5,so=0.4,sp=0.3;
             while (!token.IsCancellationRequested)
             {
-                for (int n = 0; n < 10000; n++)
+                for (int nn = 0; nn < 10000; nn++)
                 {
-                    a=a*1.0000001+0.0000001; b=b*1.0000002+0.0000002;
-                    c=c*1.0000003+0.0000003; d=d*1.0000004+0.0000004;
-                    e=e*0.9999999+0.0000001; f=f*0.9999998+0.0000002;
-                    g=g*0.9999997+0.0000003; h=h*0.9999996+0.0000004;
-                    i2=i2*1.0000005+0.0000005; j=j*1.0000006+0.0000006;
-                    k=k*1.0000007+0.0000007;   l=l*1.0000008+0.0000008;
-                    m=m*0.9999995+0.0000005;   nn=nn*0.9999994+0.0000006;
-                    o=o*0.9999993+0.0000007;   p=p*0.9999992+0.0000008;
+                    sa=sa*1.0000001+0.0000001; sb=sb*1.0000002+0.0000002;
+                    sc=sc*0.9999999+0.0000001; sd=sd*0.9999998+0.0000002;
+                    se=se*1.0000003+0.0000001; sf2=sf2*0.9999997+0.0000003;
+                    sg=sg*1.0000004+0.0000001; sh=sh*0.9999996+0.0000004;
+                    si=si*1.0000005+0.0000001; sj=sj*0.9999995+0.0000005;
+                    sk=sk*1.0000006+0.0000001; sl=sl*0.9999994+0.0000006;
+                    sm=sm*1.0000007+0.0000001; sn=sn*0.9999993+0.0000007;
+                    so=so*1.0000008+0.0000001; sp=sp*0.9999992+0.0000008;
                 }
-                Sink(a+b+c+d+e+f+g+h+i2+j+k+l+m+nn+o+p);
+                Sink(sa+sb+sc+sd+se+sf2+sg+sh+si+sj+sk+sl+sm+sn+so+sp);
                 Interlocked.Add(ref _totalIters, 10000 * 16);
             }
         }
     }
 
     // ── Memory burn — saturates IMC + all DRAM channels ──────────────────────
-    // 3 passes per iteration:
-    //   1. Sequential AVX2 read+write (256-bit stores, max bandwidth)
-    //   2. Stride-127 (prime stride — busts prefetcher, forces cache misses)
-    //   3. Reverse sequential (different access pattern, keeps IMC busy)
-    // 256MB per thread — well above L3 (32MB on 7800X3D), forces real DRAM traffic
+    // 4 passes per iteration:
+    //   1. Sequential AVX2 read+write (max bandwidth, hardware prefetcher maxed)
+    //   2. Stride-127 random-ish (prime stride — busts prefetcher, cache misses)
+    //   3. Reverse sequential (different access pattern, keeps IMC hot)
+    //   4. Random scatter write (xorshift PRNG — unpredictable addresses, reveals errors)
+    // 512MB per thread — 2× previous, forces real DRAM traffic even on large L3 (7800X3D 96MB)
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void MemoryBurn(int idx, CancellationToken token)
     {
-        int size = 32 * 1024 * 1024; // 256MB per thread (doubles)
+        int size = 64 * 1024 * 1024; // 512MB per thread (doubles)
         double[] A, B;
         try   { A = new double[size]; B = new double[size]; }
         catch (OutOfMemoryException)
-        { size = 8 * 1024 * 1024; A = new double[size]; B = new double[size]; }
-
-        for (int n = 0; n < size; n++)
         {
-            A[n] = 1.0 + idx * 0.000001 + n * 0.0000000001;
-            B[n] = 1.0000003 + n * 0.0000000002;
+            size = 16 * 1024 * 1024; // 128MB fallback
+            try { A = new double[size]; B = new double[size]; }
+            catch { size = 4 * 1024 * 1024; A = new double[size]; B = new double[size]; }
+        }
+
+        for (int nn = 0; nn < size; nn++)
+        {
+            A[nn] = 1.0 + idx * 0.000001 + nn * 0.0000000001;
+            B[nn] = 1.0000003 + nn * 0.0000000002;
         }
 
         int stridePos = (idx * 127) % size;
         var vAdd = Vector256.Create(0.0000001);
 
+        // xorshift64 state for random scatter pass (per-thread seed)
+        ulong xorState = (ulong)(0xdeadbeef + idx * 0x9e3779b9 + 1);
+
         while (!token.IsCancellationRequested)
         {
-            // Pass 1: sequential forward — hardware prefetcher maxed out
-            // AVX2: processes 4 doubles per instruction = 32 bytes/instruction
+            // Pass 1: sequential forward AVX2 — hardware prefetcher maxed
             if (Avx.IsSupported)
             {
                 unsafe
                 {
                     fixed (double* pA = A, pB = B)
                     {
-                        for (int n = 0; n <= size - 4; n += 4)
+                        for (int nn = 0; nn <= size - 4; nn += 4)
                         {
-                            var va = Avx.LoadVector256(pA + n);
-                            var vb = Avx.LoadVector256(pB + n);
-                            Avx.Store(pA + n, Avx.Add(va, vb));
+                            var va = Avx.LoadVector256(pA + nn);
+                            var vb = Avx.LoadVector256(pB + nn);
+                            Avx.Store(pA + nn, Avx.Add(va, vb));
                         }
                     }
                 }
             }
             else
             {
-                for (int n = 0; n < size; n++)
-                    A[n] = A[n] + B[n];
+                for (int nn = 0; nn < size; nn++)
+                    A[nn] = A[nn] + B[nn];
             }
 
-            // Pass 2: stride-127 — non-power-of-2 stride defeats prefetcher
-            for (int n = 0; n < 2 * 1024 * 1024; n++)
+            // Pass 2: stride-127 — non-power-of-2, defeats prefetcher
+            for (int nn = 0; nn < 4 * 1024 * 1024; nn++)
             {
                 A[stridePos] = A[stridePos] * 1.0000001 + B[stridePos];
                 stridePos = (stridePos + 127) % size;
             }
 
-            // Pass 3: reverse sequential — different access pattern, IMC stays hot
+            // Pass 3: reverse sequential AVX2 — different direction, IMC stays hot
             if (Avx.IsSupported)
             {
                 unsafe
                 {
                     fixed (double* pA = A, pB = B)
                     {
-                        for (int n = size - 4; n >= 0; n -= 4)
+                        for (int nn = size - 4; nn >= 0; nn -= 4)
                         {
-                            var va = Avx.LoadVector256(pA + n);
-                            var vb = Avx.LoadVector256(pB + n);
-                            Avx.Store(pA + n, Avx.Add(va, vAdd));
-                            _ = vb[0]; // read B to keep both arrays in traffic
+                            var va = Avx.LoadVector256(pA + nn);
+                            var vb = Avx.LoadVector256(pB + nn);
+                            Avx.Store(pA + nn, Avx.Add(va, vAdd));
+                            _ = vb[0];
                         }
                     }
                 }
             }
             else
             {
-                for (int n = size - 1; n >= 0; n--)
-                    A[n] = A[n] + 0.0000001;
+                for (int nn = size - 1; nn >= 0; nn--)
+                    A[nn] = A[nn] + 0.0000001;
             }
 
-            Interlocked.Add(ref _totalIters, (long)size * 2 + 2 * 1024 * 1024);
+            // Pass 4: random scatter write — xorshift64 PRNG, fully unpredictable
+            // This is what reveals instability: prefetcher cannot help, every access is a cache miss
+            for (int nn = 0; nn < 2 * 1024 * 1024; nn++)
+            {
+                xorState ^= xorState << 13;
+                xorState ^= xorState >> 7;
+                xorState ^= xorState << 17;
+                int rpos = (int)(xorState % (ulong)size);
+                A[rpos] = A[rpos] * 1.0000001 + 0.000001;
+            }
+
+            Interlocked.Add(ref _totalIters, (long)size * 3 + 6 * 1024 * 1024);
         }
     }
 
-    // ── Combined burn — FP32 FMA + memory pressure on every thread ───────────
-    // Each thread runs 8 FMA outer iterations then does one sequential memory
-    // pass over a 64MB buffer (above L3), then repeats. This keeps the FP units
-    // pegged while forcing real DRAM traffic from every core simultaneously —
-    // achieving higher package power than splitting threads half/half.
+    // ── Combined burn — FP32+FP64 FMA + heavy memory pressure ────────────────
+    // Each thread: 16 FMA outer iterations (both FP32 + FP64 chains)
+    // then one sequential 128MB memory pass, then repeats.
+    // Keeps both FP execution ports pegged AND forces real DRAM traffic.
+    // Achieves higher package power than either test alone.
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void AvxFmaMemBurn(int idx, CancellationToken token)
     {
-        // 64MB buffer per thread — above L3 on all current desktop CPUs
-        int memSize = 8 * 1024 * 1024; // 64MB (doubles)
+        // 128MB buffer per thread — well above L3 on all desktop CPUs
+        int memSize = 16 * 1024 * 1024; // 128MB (doubles)
         double[] mem;
         try   { mem = new double[memSize]; }
-        catch { mem = new double[1024 * 1024]; memSize = mem.Length; }
-        for (int n = 0; n < memSize; n++)
-            mem[n] = 1.0 + idx * 0.000001 + n * 0.0000000001;
+        catch { memSize = 2 * 1024 * 1024; mem = new double[memSize]; }
+        for (int nn = 0; nn < memSize; nn++)
+            mem[nn] = 1.0 + idx * 0.000001 + nn * 0.0000000001;
 
         // Same 24-chain FP32 register setup as AvxFmaBurn
         if (Fma.IsSupported && Avx.IsSupported)
@@ -1056,8 +1119,8 @@ static class StressBurner
             int outerCount = 0;
             while (!token.IsCancellationRequested)
             {
-                // 8 FMA outer iterations (same as AvxFmaBurn inner loop × 500)
-                for (int rep = 0; rep < 8 && !token.IsCancellationRequested; rep++)
+                // 16 FMA outer iterations (same engine as AvxFmaBurn but interleaved with memory)
+                for (int rep = 0; rep < 16 && !token.IsCancellationRequested; rep++)
                 {
                     for (int n = 0; n < 500; n++)
                     {
@@ -1178,18 +1241,17 @@ static class StressBurner
         }
     }
 
-    // ── Linpack-style DGEMM ───────────────────────────────────────────────────
-    // Tiled matrix multiply C += A × B, FP64, AVX2 inner kernel.
-    // Matrix size 2048×2048 = 32MB per matrix × 3 = 96MB total per thread.
-    // Tile size 64 fits 3×64×64×8 = 98KB in L2 (most CPUs have ≥256KB L2).
-    // Each outer iteration: 2 × N³ FP64 FMAs → at N=2048: 17 billion FMAs.
+    // ── Linpack-style DGEMM — EXTREME ────────────────────────────────────────
+    // N=3072: 3×3072³ ≈ 58 billion FMAs per pass (vs 17B at N=2048)
+    // TILE=96: fills ~18KB of L1 per tile triplet, keeps registers hot
+    // 3 matrices × 3072² × 8B = ~226MB per thread — well above any L3
+    // Reveals CPU instability that smaller workloads miss
     [MethodImpl(MethodImplOptions.NoInlining)]
     static unsafe void LinpackDgemm(int idx, CancellationToken token)
     {
-        const int N    = 2048;   // matrix dimension
-        const int TILE = 64;     // L2-friendly tile size
+        const int N    = 3072;  // 3× more FMAs than N=2048
+        const int TILE = 96;    // L1-friendly tile (3×96×96×8 = ~221KB, fits in L2)
 
-        // Allocate 3 matrices — each 2048×2048 FP64 = 32MB
         double[]? A_arr, B_arr, C_arr;
         try
         {
@@ -1199,7 +1261,6 @@ static class StressBurner
         }
         catch (OutOfMemoryException)
         {
-            // Fallback: half size if OOM
             goto scalar_fallback;
         }
 

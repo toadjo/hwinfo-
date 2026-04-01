@@ -1,7 +1,9 @@
 # bridge.py — HWInfo Monitor v0.7.2 Beta
 import atexit
 import ctypes
+import hashlib
 import json
+import secrets
 import threading
 import os
 import subprocess
@@ -11,6 +13,9 @@ import urllib.request
 
 from .constants import BRIDGE_PORT
 from .paths import get_base_path
+
+# ── Shared secret — generated once per app launch ─────────────────────────────
+_BRIDGE_TOKEN = secrets.token_hex(32)   # 256-bit random token
 
 
 def _is_admin() -> bool:
@@ -55,6 +60,52 @@ class BridgeManager:
         self._bridge_data = {}
         self._lock = threading.Lock()
         atexit.register(self.stop)
+
+    # ── Authenticated HTTP helper ──────────────────────────────────────────────
+    def _make_request(self, path: str, timeout: float = 2):
+        """urlopen with X-HardwareToad-Token header injected."""
+        url = f"http://127.0.0.1:{self.port}{path}"
+        req = urllib.request.Request(url, headers={"X-HardwareToad-Token": _BRIDGE_TOKEN})
+        return urllib.request.urlopen(req, timeout=timeout)
+
+    # ── LHMBridge integrity check ─────────────────────────────────────────────
+    @staticmethod
+    def _verify_bridge_integrity(path: str) -> bool:
+        """SHA256-check LHMBridge.exe against a stored hash.
+
+        On first run the hash is recorded. Subsequent runs compare against it.
+        Returns True if the binary is unmodified (or first run).
+        """
+        hash_file = os.path.join(os.path.dirname(path), "LHMBridge.sha256")
+        try:
+            sha = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    sha.update(chunk)
+            current = sha.hexdigest()
+
+            if not os.path.exists(hash_file):
+                # First run — store hash
+                with open(hash_file, "w") as f:
+                    f.write(current)
+                return True
+
+            with open(hash_file, "r") as f:
+                stored = f.read().strip()
+
+            if current != stored:
+                import tkinter.messagebox as mb
+                mb.showerror(
+                    "HardwareToad — Security Warning",
+                    "LHMBridge.exe has been modified since installation.\n\n"
+                    "The application will not start for your safety.\n"
+                    "Please reinstall HardwareToad.",
+                )
+                return False
+            return True
+        except Exception:
+            # If we can't read the file, let it through (don't block on I/O errors)
+            return True
 
     @property
     def data(self):
@@ -122,14 +173,12 @@ class BridgeManager:
         """Start LHMBridge if not already running, then wait for sensor data."""
         # ── Already running? (dev.bat pre-launched it) ────────────────────────
         try:
-            r = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/ready", timeout=1)
+            r = self._make_request("/ready", timeout=1)
             if r.read().decode() == "true":
                 for _ in range(20):
                     time.sleep(0.5)
                     try:
-                        r2 = urllib.request.urlopen(
-                            f"http://127.0.0.1:{self.port}/sensors", timeout=2)
+                        r2 = self._make_request("/sensors", timeout=2)
                         data = json.loads(r2.read())
                         if len(data) > 2:
                             with self._lock:
@@ -145,19 +194,24 @@ class BridgeManager:
         if not path:
             return False
 
+        # ── Integrity check ───────────────────────────────────────────────────
+        if not self._verify_bridge_integrity(path):
+            return False
+
         # ── Launch bridge ─────────────────────────────────────────────────────
         # The LHMBridge.exe manifest requests requireAdministrator so Windows
         # will auto-elevate it via UAC when the parent is not admin.
         # However, if the parent IS admin we launch normally (inherits perms).
         # If the parent is NOT admin and ShellExecute fails, we fall back to
         # a direct Popen (bridge will run without ring0 — sensors may be N/A).
+        bridge_args = [path, f"--port={self.port}", f"--token={_BRIDGE_TOKEN}"]
         launched = False
         try:
             if _is_admin():
                 # Parent is admin → child inherits → no UAC prompt needed
                 si, creationflags = self._windows_startup_info()
                 self._bridge_proc = subprocess.Popen(
-                    [path, f"--port={self.port}"],
+                    bridge_args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     startupinfo=si,
@@ -166,8 +220,6 @@ class BridgeManager:
                 launched = True
             else:
                 # Parent is NOT admin → use ShellExecute RunAs so UAC fires
-                # (manifest requireAdministrator alone isn't enough when parent
-                #  is non-admin and spawns via Popen without ShellExecute)
                 launched = self._launch_bridge_elevated(path)
                 if launched:
                     # Bridge is already ready — skip the ready-wait below
@@ -180,7 +232,7 @@ class BridgeManager:
             try:
                 si, creationflags = self._windows_startup_info()
                 self._bridge_proc = subprocess.Popen(
-                    [path, f"--port={self.port}"],
+                    bridge_args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     startupinfo=si,
@@ -193,9 +245,7 @@ class BridgeManager:
         for _ in range(30):
             time.sleep(0.5)
             try:
-                r = urllib.request.urlopen(
-                    f"http://127.0.0.1:{self.port}/ready", timeout=1
-                )
+                r = self._make_request("/ready", timeout=1)
                 if r.read().decode() == "true":
                     break
             except Exception:
@@ -208,9 +258,7 @@ class BridgeManager:
         for attempt in range(30):
             time.sleep(0.5)
             try:
-                r = urllib.request.urlopen(
-                    f"http://127.0.0.1:{self.port}/sensors", timeout=2
-                )
+                r = self._make_request("/sensors", timeout=2)
                 data = json.loads(r.read())
                 has_cpu_temps = any(
                     "cpu" in k.lower() and
@@ -238,9 +286,7 @@ class BridgeManager:
 
     def _fetch_once(self):
         try:
-            r = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/sensors", timeout=2
-            )
+            r = self._make_request("/sensors", timeout=2)
             data = json.loads(r.read())
             with self._lock:
                 self._bridge_data = data
@@ -334,8 +380,7 @@ class BridgeManager:
     def get_cpu_temp(self):
         """Fetch CPU temp from LHMBridge /cpu-temp endpoint."""
         try:
-            r = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/cpu-temp", timeout=1)
+            r = self._make_request("/cpu-temp", timeout=1)
             val = r.read().decode().strip()
             if val != "null":
                 return float(val)
@@ -357,8 +402,7 @@ class BridgeManager:
     def get_memory_timings(self):
         """Fetch real AMD memory timings from LHMBridge /timings endpoint."""
         try:
-            r = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/timings", timeout=1)
+            r = self._make_request("/timings", timeout=1)
             data = json.loads(r.read())
             return data if isinstance(data, dict) and data else {}
         except Exception:
@@ -370,8 +414,7 @@ class BridgeManager:
 
         if not data:
             try:
-                urllib.request.urlopen(
-                    f"http://127.0.0.1:{self.port}/ready", timeout=1)
+                self._make_request("/ready", timeout=1)
                 return "Bridge running but no data yet — still initializing"
             except Exception:
                 return "LHMBridge not running or not accessible"
@@ -417,8 +460,7 @@ class BridgeManager:
     def get_mobo_sensors(self):
         """Fetch motherboard SuperIO sensors from LHMBridge /mobo endpoint."""
         try:
-            r = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.port}/mobo", timeout=2)
+            r = self._make_request("/mobo", timeout=2)
             data = json.loads(r.read())
             return data if isinstance(data, dict) else {}
         except Exception:

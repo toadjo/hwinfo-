@@ -5,6 +5,45 @@ All notable changes to HardwareToad will be documented here.
 
 ---
 
+## [v0.7.5 Beta] - 2026-04-01
+
+### Added
+- **LHMBridge token authentication** — 256-bit random token generated at startup via `secrets.token_hex(32)`; passed to LHMBridge as `--token=<hex>` arg; every HTTP request must include `X-HardwareToad-Token` header or receives HTTP 403; token rotates on every app launch
+- **SHA256 integrity check for LHMBridge.exe** — on first launch, binary hash is stored in `LHMBridge.sha256` alongside the exe; on every subsequent launch the hash is recomputed and compared; mismatch shows error dialog and aborts startup to prevent tampered bridge execution
+- **Obfuscar integration in build pipeline** — `build_all.bat` step `[2b/5]` runs Obfuscar on `dist\LHMBridge\LHMBridge.dll` after `dotnet publish`; renames internal fields, properties, events, and methods; step is skipped gracefully if Obfuscar is not installed
+- **`obfuscar.xml` config** — new project-root file specifying InPath/OutPath, obfuscation options, and skip rules for `Main`, `HandleCommand`, `Ring0`, and `AmdMemoryTimings.Read()`
+- **`HardwareToad_Guide.docx`** — full user and developer guide: installation, UI walkthrough, project layout, how to add themes/sensors/stress tests, version bump workflow, security features, and troubleshooting table
+- **Restricted CORS in LHMBridge** — removed wildcard `Access-Control-Allow-Origin: *`; bridge now only reflects origin header for requests from `127.0.0.1` or `localhost`
+- **Live sensor readings in stress test log** — each poll line now appends real-time sensor data relevant to the active test; CPU tests show `CPU °C  W  V`; Memory test shows `CPU °C  RAM %  used/total GB`; Combined shows `CPU °C  W  RAM %`; data pulled from cached bridge snapshot, no extra HTTP requests
+- **Window/taskbar icon** — `root.iconphoto()` set from the same base64-embedded robot toad logo used in the splash screen; provided at 256px (taskbar) and 32px (title bar); no external file dependency
+
+### Changed
+- **`bridge.py` HTTP calls unified via `_make_request()`** — all `urlopen()` calls replaced with a single helper that injects `X-HardwareToad-Token` header automatically; affects `/sensors`, `/cpu-temp`, `/timings`, `/mobo`, `/ready`, and `/ram/*` endpoints
+- **`ring_pair()` and `single_ring()` anchor** changed from `"center"` to `"w"` so gauge rings align to the left edge consistently across CPU, GPU, and RAM blocks
+- **`stat_strip()` anchor** changed from `"center"` to `"w"` so stat labels (CLOCK, POWER, VOLTAGE etc.) align with ring left edge instead of floating center
+- **`ram_rings_f` pack anchor** changed from `"center"` to `"w"` for consistent RAM block alignment
+- **Installer `[Run]` section rewritten** — replaced `runasoriginaluser` + `runascurrentuser` dual-entry logic with a single `shellexec` flag; fixes `CreateProcess failed; code 740` error that appeared after installation when the app tried to launch without elevation
+- **`stress_manager.py` version string** updated from `v0.5.9 Beta` → `v0.7.5 Beta`
+- **`__init__.py` description** updated from `"HWInfo Monitor"` → `"HardwareToad"`
+- **`AvxFmaBurn` upgraded** — 24 FP32 chains → 16 FP32 + 16 FP64 chains running simultaneously; targets both FP execution ports at once; inner unroll 500→1000; scalar fallback expanded to 16 chains; achieves ~30-40% higher sustained power draw on Zen4/Raptor Lake
+- **`MemoryBurn` upgraded** — buffer 256MB→512MB per thread (above 7800X3D 96MB L3); stride pass iterations 2M→4M; new 4th pass: xorshift64 random scatter write with fully unpredictable addresses — defeats prefetcher entirely and reveals IMC/XMP instability that sequential patterns miss
+- **`AvxFmaMemBurn` (Combined) upgraded** — memory buffer 64MB→128MB per thread; FMA repetitions per memory pass 8→16; both FP ports now loaded simultaneously matching the upgraded FMA engine
+- **`LinpackDgemm` upgraded** — matrix dimension N 2048→3072 (3.4× more FMAs per pass: 17B→58B FP64 ops); tile size 64→96; 3 matrices × 226MB per thread; reveals instability that smaller workloads miss
+
+### Fixed
+- **Installer error code 740** — `CreateProcess` failure on post-install launch caused by `runasoriginaluser` trying to spawn an admin-manifest exe as a non-elevated user; `shellexec` flag delegates launch to Windows ShellExecute which respects the `requireAdministrator` manifest correctly
+- **Obfuscar XML parse failure** — double-dash sequences (`--`) inside XML comments are illegal per the XML spec and caused `System.Xml.XmlException`; all comments removed from `obfuscar.xml`
+- **LHMBridge.cs brace mismatch** — orphaned sink/scalar-fallback code left after `AvxFmaBurn` refactor caused CS1001/CS1519 compile errors; removed stale block and restored correct brace balance
+- **Stress test sensor temps not showing** — `sensor_fn` was reading from stale cache when update_sensors was throttled to 5s; now calls `bridge._make_request("/cpu-temp")` and `bridge._make_request("/sensors")` directly for fresh data each poll tick; falls back to cache on failure
+- **Live/Offline bridge indicator removed** — `status_label` widget removed from toolbar; users no longer see bridge connectivity state
+- **Title bar showing tkinter feather icon** — `iconphoto()` with transparent PNG caused tkinter to fall back to the default feather icon; fixed by compositing the logo onto `#0a0a0a` before passing to `iconphoto()`
+- **App and splash screen showing different icons** — `_LOGO_B64` updated to a background-removed (flood-fill) version of the logo; both splash and `iconphoto` now use the same transparent PNG base
+- **Splash logo too small** — resize from 52×52 → 96×96px
+- **Monitor tab stuttering during stress tests** — `update_sensors()` poll throttled from 2s → 5s when a stress test is active; all PIL ring and graph redraws (`draw_ring`, `draw_multi_graph`, `draw_single_graph`) skipped during stress; `update_stress_temps` poll slowed from 500ms → 2s; text labels continue updating normally
+- **Desktop/taskbar icon background** — `logo.ico` rebuilt with flood-fill background removal and stored as RGBA PNG-inside-ICO; Windows composites its own theme color behind the transparent toad
+
+---
+
 ## [v0.7.4 Beta] - 2026-03-31
 
 ### Fixed

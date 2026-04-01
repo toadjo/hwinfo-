@@ -1,4 +1,4 @@
-# stress_manager.py — HWInfo Monitor v0.5.9 Beta
+# stress_manager.py — HardwareToad v0.7.5 Beta
 import queue
 import threading
 import time
@@ -59,7 +59,7 @@ class StressManager:
         except Exception:
             return {"error": f"bad JSON: {raw[:120]}"}
 
-    def _poll_loop(self, cmd_prefix, stop_ev, log_cb, my_gen):
+    def _poll_loop(self, cmd_prefix, stop_ev, log_cb, my_gen, sensor_fn=None):
         passes     = 0
         last_iters = 0
         last_time  = time.perf_counter()
@@ -83,10 +83,19 @@ class StressManager:
             last_iters = iters
             last_time  = now
 
+            # ── Sensor readings ───────────────────────────────────────────
+            sensor_str = ""
+            if sensor_fn is not None:
+                try:
+                    sensor_str = sensor_fn()
+                except Exception:
+                    pass
+
             if "error" in d:
                 log_cb(f"Bridge error: {d['error']}")
             else:
-                log_cb(f"{threads} cores | {rate_str} | Pass {passes} | OK")
+                base = f"{threads} cores | {rate_str} | Pass {passes}"
+                log_cb(f"{base}{('  |  ' + sensor_str) if sensor_str else ''}")
 
             stop_ev.wait(2.0)
 
@@ -96,7 +105,12 @@ class StressManager:
         else:
             log_cb("■ Superseded by new run.")
 
-    def make_stress_action(self, cmd_prefix, card_id):
+    def make_stress_action(self, cmd_prefix, card_id, sensor_fn=None):
+        """
+        sensor_fn: optional callable() → str with live sensor readings.
+        Called once per poll tick and appended to the log line.
+        Pass from app.py based on cmd_prefix so each test shows relevant data.
+        """
         self._log_routing[cmd_prefix] = card_id
 
         def start(log_cb):
@@ -104,7 +118,6 @@ class StressManager:
             if existing and not existing.is_set():
                 existing.set()
 
-            # Fix: Ensure the line below is complete
             new_gen = self._generations.get(cmd_prefix, 0) + 1
             self._generations[cmd_prefix] = new_gen
 
@@ -124,7 +137,7 @@ class StressManager:
 
                 t = threading.Thread(
                     target=self._poll_loop,
-                    args=(cmd_prefix, stop_ev, log_cb, new_gen),
+                    args=(cmd_prefix, stop_ev, log_cb, new_gen, sensor_fn),
                     daemon=True,
                 )
                 self._poll_threads[cmd_prefix] = t

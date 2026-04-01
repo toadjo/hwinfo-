@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Obfuscator>
+
+    <Var name="InPath"      value=".\dist\LHMBridge" />
+    <Var name="OutPath"     value=".\dist\LHMBridge" />
+    <Var name="KeepPublicApi"          value="false" />
+    <Var name="HidePrivateApi"         value="true"  />
+    <Var name="RenameFields"           value="true"  />
+    <Var name="RenameProperties"       value="true"  />
+    <Var name="RenameEvents"           value="true"  />
+    <Var name="RegenerateDebugInfo"    value="false" />
+    <Var name="UseUnicodeNames"        value="false" />
+
+    <Assembly filename="LHMBridge.dll">
+        <SkipMethod type="LHMBridge"        name="Main" />
+        <SkipMethod type="StressBurner"     name="HandleCommand" />
+        <SkipMethod type="RamTester"        name="HandleCommand" />
+        <SkipType   name="Ring0" />
+        <SkipMethod type="AmdMemoryTimings" name="Read" />
+    </Assembly>
+
+</Obfuscator>

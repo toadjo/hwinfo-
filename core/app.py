@@ -1040,53 +1040,259 @@ def main():
     # ── Robot Toad logo (base64-embedded PNG, no external file needed) ─────
     import base64, io
     _LOGO_B64 = (
-        "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"
+        "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAA2fUlEQVR4nO3dd3zkdYH/8de3T5/M"
+        "ZFI3ZXsFlqbgoWBBTwSlKIdnBwsoenpiubPcWU5/cqIn3nl33GE9GyqCDQuiIihFabLsLts32ZY2"
+        "k+nfmfmW3x8pZLPJbrKZmWRmPs/Hgwe7m+Q7n8x8v+/v5/upks/nQxCExiQvdgEEQVg8IgAEoYGJ"
+        "ABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhg"
+        "IgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAa"
+        "mAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCE"
+        "BiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAE"
+        "oYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamAgAQWhgIgAEoYGJABCEBiYCQBAamLrY"
+        "Bah15wbC7gc7VrDa42WXmefGw3t5MJOUFrtc9Ui81+Un+Xy+xS5DzerSPe5d684g6DHQ/V6K2Txp"
+        "s8DLnn6MA0VTnJhlJN7ryhCPAAtwfjCCT1YIdbXgb20i1NWCT1Z4XrBpsYtWd8R7XRkiABbAxZ3l"
+        "34VyE+91ZYg2gAW4Lz1KzrFRDgxNVkvzrsP96dHFLlrduS89St51jnqvc44t3usFEjWABThQNKW3"
+        "7d3K46OjJOJJ9ksS/2JnxDNpBRwomtK/2Bn2SxKJeJLHR0d5296t4r1eIFEDWKAHM0np8p2PA7Bh"
+        "wwZ306ZNqE9vxbKsxS1YnVEUBWv9Gt6+dSvbtm0TF32ZiAAoox07dkgbN25016xZ4y72SRpTNbdZ"
+        "1enUDaKqRkRRkSWJoKKiAD5ZQZXGimi5LjnHxgbStoXjuiRsixGryOFikRGryLBVWtTfZ+3ata4k"
+        "SezcuVNc/GUkAqCMbNtm69atbNq0iZ07d1a8FhBWVNZ7/e5qw8dar481Hj89hodmRUWTxp7uiq7L"
+        "kF0iNX6BT1zoOdfFdsea0BRJwidJk8GgACFZoUXR0MdDouQ67oht0Vcw2Wlm2ZHPsbOQ4+l8Vkra"
+        "lf09FUVh48aNPPXUU6JmVWYiAMqsUrUARZLY6PW7z/aHeXYgzKneAK2aju26HLZL7CoVeMoq8st0"
+        "lhHHYsi2GLYtko69oNcNywoxRaVFUYnJKstUjZW+ABeEm+lUNWQkd8gq8UQ2xcPZFA9nkmwzs9JE"
+        "uJSDuPtXjhgIVAETbQF33nmntJA71grD614YinJOoImzAyECssLeUoHHi3m2FPPsLhXYaxUolPFi"
+        "mw+PJLNc1VmtGZyiezld97JcM8g4Nn/KJHkok+TXqTj7CvmTvnAVReGyyy5zt4pn/4oQAVABCzlp"
+        "N3r97l+HY7wk3Mwaj499pQJ/KuZ4rJDj8UKO+ALv6JUWlRXOMHycbvh4tu6jVzN42szxq+Qwv0yO"
+        "sD2fndf7Ua4wFWYmAqBC5nPitmq6e1W0nVc2t9GlGWwv5rnXzPLbfIp9VrFKJa6MFarB870BLvAE"
+        "WK976Sua/GBkgB8kBhgsFY8bBuLuX3kiACrkRCevjMRfBcPua5o7eGEoyiG7xI+zo9yTT3PYLi1G"
+        "kSuuQ9F4kTfIZf4m2hSN36TifGv4MA9kRqWZHmLE3b/yRABU0EwnsCbJXBFtda9t7aJDM7jPzPDD"
+        "bIJHCrmGGdYqAc8y/FzmC/M8b5BDpQK3DPRzR2JQKk30TIi7f1WIAKigqSfxru1PS6+MtrrvaOsm"
+        "KKt8L5fgh5lRRpzGvrPFFJUr/BGu9DeRsi2+dKSPOxKD0ur168XdvwpEAFTYpg0b3TNOPYVrtu4n"
+        "Isnclknw3WycjOMsdtGWlKCscFUgwqv9UeKOxZc39vL4lqd4attWcfevIDEXoII2eQPuxxyDgKxw"
+        "e5OHy4/s5tb0sLj4Z5B2bG5NDXPZwC5uj3gJKCr/5HjY6PU3ypPRohABUAFBReGjnSvdH67ZTBaX"
+        "p/fsYaizjbwsbmYnkgMGO1rZvmcPg06JO9eezk09a90mRYxZqwQRAGV2fjDi/mr9We4LIzHeGz/A"
+        "+0YO8NS+vbiuS3d392IXb8nr6elBkiS279/HxxOHee/IAc4KNvHz9We6zw02idpAmYkAKBNNkvmH"
+        "zhXu/67YyC/NDK8Z3MtDZhYAx3HYu3cvK1euRFGURS7p0iXLMitWrGDPnj3Y9tiApwfNLK8d3Muv"
+        "zAxfXrGJD3aucDVJ1KTKRQRAGSzTPe53Vp/qvjLaxvvjB/iP5CClacNz+/r6RC3gBCbu/v39/Uf9"
+        "e9F1+ffkIO8e6eeySCvfW73Z7TW8ojZQBiIAFugcf9j96dozKMgyrx3cyx/H7/rTiVrA8c1095/u"
+        "z4UcVw/vp6DI3LFmM88KhEUILJAIgAW4uKnF/erKTfw0n+TvRw6ccJy+qAXMbra7/3TDtsXfDffz"
+        "SzPN11eewkubYiIEFkAEwEl6Y0un+/metXwjG+fm5CDOHMbxLVYtYP369ZN/jsVixGKxOX2tWuZy"
+        "95/KweVzowN8KTXIzT3reEvLMhECJ0n0rZyE69u63Xe29fCx0cPcnUvN62f7+vpYsWIF3d3d7Nu3"
+        "rzIFBFZrHq4PxpBxSfojhKPLACiEwwAYjgFw3K8BWEjcnBqkr4KTkuZ695/utkyCUdvmo53LkSXJ"
+        "/Z/BA6J1cJ5EAMzT3za3u+9q6+Ef4ge538zM++en1gL6+/vndMc7GdcHY/zjwV0MWSXYv/2ZL+yf"
+        "9o3H+xrQrRt8pGMF74sfrEg553v3n+6X+RTmiMOn2nuJWyX3B/EBEQLzIAJgHi4MN7v/vGwVN44e"
+        "OamLf0J/fz8rV648YS1AkiQ8Hg+GYSDLMrIs4zgOjuNgmiaFQgF3lsVANImxi3+B+osFPMfpdltI"
+        "GeHk7/5T3Wtm+PToEf6lazUZx3Z/MTosQmCORADM0dn+kPvFnnX8d2qIn+SSCzqWbdts2bJlxgvD"
+        "4/EQiUQIhUJIkkQulyOfz1MsFrEsC0mS0HWdUCiEz+fDdV1SqRSJRALTNGd8vRZVO6lyzhYg5Sxj"
+        "Nptly5YtC64J3ZVL0qZofK5nHQOlgvtYNi1CYA5EAMxBSFH5t971/Cyf4puZeFmOOTg4eNTfA4EA"
+        "7e3tOI7D4cOH2bVrF84c5gzIskwsFqOzsxNZljly5AiZzMnXTo6nEmUcGhoqW/m+mh6mU1H5Qu96"
+        "Ltn+KOklvnrSUiBmA87Bzb3r3Q3+AFcP7S/7+nuGYdDb20s+n2ffvn3kcrmTPpbP52P58uV4PB7e"
+        "kzB5w96tZSnjN1Zs5Oaot+xl3L9/P8VieRsXPZLMV1t6eTqX4Z37xDoCJyJqACfwN9E29yXhZq4e"
+        "2lf2iz8ajdLa2sr27dtJp9MLPl4ul2Pr1q0EAgHUjpWT/77QRwBVVdmxY0fZy7hhwwaGhoYYGRlZ"
+        "8HEnmK7DRxKH+ErLcl4ZbXNvF42CxyXGARxHTNXcDy9byReTg+wqFcp67O7ubvx+P4888khZLqyp"
+        "MplMWe+sxWKxImV85JFH8Pl8LFu2rKzH3l0q8F+pIT66bCXNJxl+jUIEwHG8u72Xw3aJH+ZGy3rc"
+        "np4eTNNk69atc3qGPhlTGxiHrNJJ/TfTscrJcRy2bh17TOno6Cjrsb+fTTBgW7yrvVcMEjoO8Qgw"
+        "ixWG170y2sYN8QOUc5OLlpYWbNtmz549x/0+nyxzYTDKs31BTvX4iSoqYUVl1LZI2BZPmlkeyqX4"
+        "dSpB3j1+iJS7F6DcZdy+fTsbN24kFosxPDx8UmWdznZd/jM1xI3RZfzf0EF39wL2JqhnIgBm8Q+d"
+        "K3i0mJuc0lsOHo+H5uZmHnnkkdm/R5K5LtbJq5taCc4wXLhZ1WhWNVYbXi4Px0i1WnxndJBbhg9V"
+        "bYOQSpRx+/btnHnmmaTTaQqF8jxu/cHM8Hghxw2dy3nH3m1lOWa9EQEwg17D674wFOUtQzMMjVuA"
+        "rq4utm3bNmu1f6PHz02dK+nVPXM+ZkhRuba5k5eGmrnh4C62mce20JdjQFCly+g4Dk8//TSrV69m"
+        "165dZSvvLelhbmnpoVv3uP1iK/FjiDaAGbwq2sbuUoGnivmyHdPn81EqlWbto9/s9fOVnnVHXViK"
+        "4aHpeefRcsH5tDW3IHv9fHJ0gOf3b+OC/m18ZPgAw+Mbc/ZqBl/tXs8pHn/ZylztMqbTaSzLopxd"
+        "008W8+wpFbgi2lq2Y9YTEQDTyEhcHm3lx2Vu+GtpaaGvr2/GrzUpKv/etZag/Ex12q8btFz9OrxX"
+        "XIJ62UWUrnw5l+/5Cz9KDpFxbLKOzS+yo7x1YO/kIqNBReE/utYQVlRMx6VLM2Z8vfloVTVKbmXK"
+        "OJO+vj5aWloWXO6p7sql+JvmdhSxktAxxCPANM8NNrnNisYv5znL70R8Ph+p1MzHfG9rN81TLoiQ"
+        "x4tf98CKnsl/29fZwv4ZaiT9pQLfyyW4JtAMjDX4/X1LF58Z2M+H23rRZYnkih7Ce8fCx2mNYVkW"
+        "RmJsOPPUr9ktzZRKpcmvAViuy02DfRUp48eO7Dvme5PJJOvWrZvxfTpZP8+neEe4hecEwu796VGR"
+        "AlOIAJjmvGATjxZyC95Weypd18nnZ36cCMoKF4eik383VG3swgLYux/WrQbggSefnPX4v8mmeHtT"
+        "O4XxZ/1XhGN8bqiftx/YAcCpYZ0n+54G4LzuGMPpUQ7FDwGwvjXI9vhBdF1nfVczu/r3MzAwULUy"
+        "pmeYA5DP5zEMo2yNgQnb4lEzy3ODEe5Pj5blmPVCBMA0zwqEebB48kNdZ+Lz+WZ99n+2P4RHeuZJ"
+        "zD+1ce37P4HTNgJw43dvnfX4+4p5/IYxeXEZksSzfCF+k04A8OSUC/PQoUOUSs80Cm7fvn2yjIcO"
+        "HTrm4q9WGafKZDJ4PJ6yBQDAX0omZ/tDZTtevRABMIVHltng8fE/2fJM+JmgadqsI/OWqfpRf9en"
+        "dquVSvDIE2N/PM7IPhkJTT76o5zt+b9UKqGqx37sqqoeFQyLXUZNK+8IvieLed4QiWLIMgWxMcsk"
+        "0Qg4xam+oCsjsbU487Tak1WOkXTH63br0Y+9kNxF2Gq0nGUs9+jDLYU8iiRxijcgRgZOIQJgipWG"
+        "l0NWkdwJRtbNl2VZM951AQ5OW2qrOMu8+ItCs6/Vd1EoRmnaJqMHijNXnzVNY6bNNmuhjAuRdR0G"
+        "7BIrDG9Zj1vrRABM0a7pxCtQPczlcgSDwRm/9lA2hTklcLKz1D6ubeli+Qx32OW6h2tbushOeV7O"
+        "uw5/ys08eScQCMy4cEgtlHGhhh2bjjJ0jdYTEQBTvCAUJeWWfyvqYrGI1zvznSfj2Pw0+cx02IJV"
+        "IjvDnTEoK9yxcjOvirQRlBWCssKrIm3csXIzcqk02bgG8JPkCJlZejG8Xu+MjWu1UMaFSjk2F4Qi"
+        "ZT9uLRONgOOube1yN3oD3J0vb///hFwuRygUmnEswE1D/ZwfaKJ1fNJOysxhOw5Bw8vUsSutms7N"
+        "XWuhay0ArgvpQp7UlDvykFXiC0MHZixDOBw+7mIetVDGhci6Duf5gry5ZZn75aGDYjwAogYAwGua"
+        "O9y/b+/lz4XyTfyZbmhoiJ6enhm/lrZtrj+wk6T9TO0jWzQZzCRJF/IUbQtnvAruuA5FyyJt5hnM"
+        "JI+qjqdtm3dNO85UPT09x12CqxbKuBAS8IiZ4/0dy3lVtE00BiJqAJwfjLj/tGwln0kOsE4zaKnQ"
+        "NtS5XA5VVQkGgzMurrHVzPKW/h3ctGwVvePPqY7rkCmYZAonfh7eVzR536HdM060AQiFQqiqesIa"
+        "wFIv40IYSOyyCvzaTPPJrtUcLhbcP2Qae2RgQ9cAVhle9+be9fxfZoSfZkdJOjZhqXI79hw8eJB1"
+        "69YhyzO/7VvNLJfveZL/Hj406x1yulHb4j+HD3LF3i2zXliyLLN27do5Lb1dC2U8WU2KSsZxuDM7"
+        "ym3ZBF9asYG1Hl9D1wQadlHQkKLy43VnuDusIh+OH8QFXuEL88ZgjFcO7K7Y68ZiMTweD9u2HX9+"
+        "uleSeVEwwrn+EJs8fprHF9tI2hYjtsUWM8uD2RT3pBNHtdDPZNOmTWSz2TmvvVcLZTwZd7av4tb0"
+        "WNjLSHw62slKRePSHY9JMw1JbgQNGQAScMuKjW6v189bhvZPrlazWffyn7EeXnx4Z9nHAkzV1dVF"
+        "sVhk9+7KBc2E9evXY9s2R44cmdfP1UIZ58MvyfyqYw3XDffx5PiEJZ8sc2ushz25LG/ft01qxKpA"
+        "Qz4CXNva5Z4TCPOP8YNHLVW1vWTiSrBJr+xgkQMHDqDrOhs3bpy1qr1QsiyzceNGXNc9qQurFso4"
+        "H6caXhzg6dIzbRU5x+HD8cOcF4rw5gbdYLThAuA0X9B9T3svn0kOHLPhZcF12V4ssLnCAQBjF1gm"
+        "k+Gss84iFCrvJJVAIMBZZ51FPp/n0KFDJ32cWijjXJ2m+9hWMilOG2K81ypw4+gRbuhYzkavv+FC"
+        "oKF6AQxZ5sbuNdydS826q+9fijlOM7xQ3lWwZ5RIJMhms6xevZpCocDevXsXvOnGihUr0HWdPXv2"
+        "lGVp8Foo41ycpnsnq/7T/SKX4rmeAP/Wu55X7HisoSYLNVQbwIc6V7iXRFt57eC+WbeNOtfj56bm"
+        "Li45vIvRKm4tNX3brZGRkTntl6coCs3NzXR0dCBJEgMDA1XbGmwplnEmEVnhJx2ree/wAR6eZaxH"
+        "SFb4dusK7ogPcOOhvQ3TNdgwAbDJG3B/uGYz748f4I/HWelXRuKO9lV8OzPCbZlj56pXmmEYRKPR"
+        "ySq3aZrkcjlKpRKO4yDLMpqm4fP58Hq9kxtvxuPxigyfrdUyTvWaQJSrAhGuGNhz3CXen+sJ8Jno"
+        "Mi7d8ThPm9mGCIGGCAAZie+t2eyOSC4fnsM+99eGWjjfE+C1g3urULrZSZKEYRjouo6qqkiShOu6"
+        "WJZFsVg84dbbooxjvtO2gntyaW5Nn3jPgRujy4gg8aodT0jOIkyprraGaAO4srnNXePx8tE5XtA/"
+        "zY3ypmAzp+getpR5bYD5cF0X0zQrMjOuXJZ6GU/TvfSqOj+d45bun08O8N22lVwebW2IfQXrvhfA"
+        "Jyu8u62Hr2fiDM1x5NpBq8TvzQzXhcRS0rXuunALv8tnOGLPbW+EAdvim+k4N3Qsx1Oh7s+lpO5/"
+        "w6tbOl1ZlvnePJ/nv5Qc5HTDx3OMyq2zfzIMw8Awlt6c9qVYrud6Apym+/iv1PwmF307E0cC3hjr"
+        "rPtngLoOgJCi8pbWLm5ND59wKOp0fVaRH2UTvLupDXWJrCdvGAanb97M6Zs349P1E/9AlfinlEtf"
+        "IuVSJIl3hFq4I5ug35pfV2PedfhaJs51rd1H7YNQj+o6AF4f63BzrsNPs3N7/pvuy6lhWhWVV/qb"
+        "yluwkzTRmKYg8T8ty3lrKFax2Ytz0aKovC3Uwi2xXhSWRkhOuMofoU3V+Er65OYW/CibIOPavDbW"
+        "Ude1gLrtBfDKCvduONv9SibOD7In3533cl+YDzS1c83QPnaWqt+FNd3EHXaZI/HKQISXeIM8Ushx"
+        "dz7FQ2aWbAXnMAAEJJlzPH5e7Atxpu7jV/kUt2dGOSiPXSfVGthzPKs1g6+0LOfG0SP8bI6NfzN5"
+        "dSDK6/0RLtj2J8ms08FBdRsAr491uH/X3svlA3vmXf2f7hORTtboBlcP7l/wscrNJ8m82Bfi+Z4A"
+        "pxk+thVN/mBm+IOZod8qLrgjSwJ6VJ3zPAH+yhNgg+7hL8U8v82l+LWZJrfELgyvJPO11uXsKhXm"
+        "1OV7omPd0b6Kmw7t5bsjR5ZWFadM6jYAfrbuTPeBUp7/nmcD0EwCssw3W1fwcCHHpxOHy1C6yvBK"
+        "Ms/y+DnP8PNsj5+wrLCnVGBXqcCukskBu0TSsck4DhnHJuM6SIzNlAvICgFZJiwrdCk6qzWD1ZqH"
+        "larOqGvzsJnlD2aGPxVySy4Ep/pIpIMzdB9vHNxLpgzlfGe4lbMVg0t2PCYCoFac5Q+531l9Kq86"
+        "sodDc+z+OZFTxqcKfyU9zNdO8rmy2gKyzGrNw2rNYJVq0KlohMYv9ICsEJBkXMbWysuMB0PKsTlo"
+        "F9ldKrLbGguOzBK7y8/mzcEYrw9GuX64v2w7Oy9TNb7ftpIrd/6FJ3LpuguBuhwI9DfN7TxkZst2"
+        "8QNsKeb5UPwgn2nuIm5b/HgBz5bVknEcHi/keLxQmSW2lpLL/U1cE2zmQ/GDZd3W/aBV4s+FHFc1"
+        "t/PELMuY17K66wXQZZmXhJv5eQVW973fzHBj4jAfaGrnAu/Ma+gL1fdCb5Abwm18evQI95rln2T0"
+        "81yKi8IxNKnuLpf6C4DzgxFXkyTur8CJAPCTXJL/SQ/zqWgnL/WJzSYX28W+MJ+ILuO/UkMLavE/"
+        "nnvzaXRZ5rxguO66BOvuEeCicIw/5jMVbZ3+RnqEnOPw0aYOulSdW1Njk0wMw6CrqwsYW0xjMWa+"
+        "1aPZ3terAhHeFWrlC8kBflDBmZs51+EhM8NFTS38LlX9GaKVVFc1ABmJ5wab+EMF1/ef8INsgo8k"
+        "DvGGQDM3NLUhI9HV1YWiKCiKMnnCCgs3/X1VJIn3N7XxjlArH04cqujFP+E+M8P5waYlNtxp4eoq"
+        "ADZ4/W5U1XioCgEA8Nt8mr8b6eel3hBfjHWjL5Ehw/VMlyS+2NzNhd4Q7xzu4958dRrmHirkaFF1"
+        "1tXZsmF1FQDnBZvYXSowPMdZf+XweCHH6wb3oksS/2wqhJGwbZsDB2be+kqYvwMHDmDbNkFX4qOm"
+        "jEeSuGZo36xLfFXCoF1iT8nkeYGmqr1mNdRVAJztD/F4sfpdXgO2xfXDffypmOMLGbhoKIWzBIbE"
+        "zkqC0Evaaf+HDbR/cAOhl7SzlOu2brHIxcNpvpiFhws5rhvp56BVvi7euXqsmOdMf301/NZVAJzm"
+        "C7KlineFqbzBIJ89sp/rD+/mpb4Q325dwbmepTWVeELownZcn8T+L/yFfV/4C65PInRh+2IXa0bP"
+        "Mfx8u3UFL/YEefuh3XzuyH48/sV5X7cVTTb76qv7t24CoEv3uDFV46lFWMHH6/WSz+cxTZM/ZlNc"
+        "um8r92WSfC7axU3NXbQrWtXLdDy+MyMM3dVH7/tOY/n7T2Porv34zlxa22a3KCr/HOngc7EuHsym"
+        "uGz/Vh7MpSgUChQKhVm3Mq+kLcU8rZpOh2bUTTtA3QTAOo+PnONwYJ5zvxdqYgHMqVtqpx2bzwz1"
+        "87f92wkh8Z22FbwlFCOwlFaYmb4PzhI5pYOywttCLXyvbSUdssrf9G3nE4N9R63iPDo6iqZpFduw"
+        "ZDZ9VgnTdVjvXZo1u5NRN+MAVhpe+qxC1c9jv99PIpGYceHL7YU8b+jfwcuDEa6LdfLqQJTbMnG+"
+        "m0nMuix5NeQeSRB7WS/7PvsEALGLe8k9urj92yFZ4W8DUa70NzFq23xqsJ+fpEZm/TwTiQRNTU0z"
+        "7mJcKQ4uB6wiKw0vv63aq1ZW/QSAx0dflRuGNE3Dtu3jDvhxcPlROs5dmQQvD0Z5a3MHVwWifD+T"
+        "4PZsoqo9FhNS9xwh9KJ2lr9nMzAWCKl7Krs112xaFJUr/E1c6Y8watv869ABfpaOUzrBSsKFQgHb"
+        "ttE0jVKpep/7fqvECqP6jx+VUjezAb+56lR3m2txSxmm/85VOBxmcHBwTptjTNAkiUuCUd4cbadT"
+        "1bnPTHNnLsmfzByNsAw1jA3YOsfj5zJfmPM8AQ5aRW6NH+GuOVz4UymKQmtrK8lk9SZmXRdqYZ2k"
+        "8vrdTy7hfpO5q5saQKumc/8MS1MrksRLvaGyjxPXNG3yLjQfJdfljtQId6ZGeLYvyJXhFm6KdjFg"
+        "l/hxLsk9+dSidHFVQ5eqc6E3yCv8TbQqKvdkRnn7oV08nEufVPTZtk2xWKxILeBiX5hf5FPHbCQy"
+        "YlvEPPVTA6ibAIipGiMzVKevCTZzqu4tewB4vV6Gh0+80cRsXOChXJqHcmliisZl4WYuDTXzjlAL"
+        "O4omvzPT3Gtm2L0EliFbiNWawfM9QZ7vDbBa87CvaPL90SHuTA7P+HnN1+joKLFYrOwB8Ne+EB2q"
+        "NjnPY0LCsYlpS2Ph03KoiwBQJYmgoh6zl99Zho9LfU28aWhfeV9PVbFtG8sqz/P7sF3i1vgRbo0f"
+        "YY3u4cJAhAuDTbwt1EK/VeSh8Tn9jxdzi9JmMB8xReUMw8dmzcs5Hj/dqs6OQp5fpRJ8IDvKrkJ5"
+        "x2nYto3ruiiKMu/a2PH8c/wQX29dzpPFPA9N2UoubluEFQVFko67zVitqIsA8EgyEhw1A7BZVvlY"
+        "pJOPJQ6V/aIxDOOobr9y2lk02Rk/zH/FD9OtGbwo0MRZ3gAfDLcRVBT6rCKPF3I8Wcyz2yqyt1Qg"
+        "v0hLdPlkmRWqwSpV5zTDx2bdS7eqk7ZtHjUz3JYY5LfZJP0VrsUkk0lCoRDZbPnmgCQcm48lDvOJ"
+        "SCdvGto3eQ6ZuMhIeGSZbBkDZ7HURQDo4/3BpfEnSRmJT0Y7uT2b4M8VWA1HVdWyT/WVgVPH+5ef"
+        "zGdxgP5Sga8lBvhaYgAZiTWGh7O9Ac7yBnhzMEa7quHgctiy2F0y2WMVOWAVGbEthhyLEccmscDw"
+        "i8gKzYpKq6ISVTS6FY1VmsEK1aBT1ZCAI1aJLWaWbyUG+HM+w66CeUyD5ky/X7kUCgVUtfyn8qOF"
+        "HLdnE3w80sk7h/twgeJ42OpIVGfKWWXVRwBIY2tSF8erZJf4QmiSxDfS8bK/1kTjX7md6g1waTCK"
+        "oijoepInx4NrYs893WOwH5f9ZprbzTSmaRKUFTYGw6zUDFZrBqdoHl7sDdKqaGjjMxNLrkvcsUk4"
+        "Fo7rknUdbJfx/4/vMyBJ+CUZRYKApCBJz1z4Ks8cZ9ix6C+Y7DZz3Oem2VMqsLtoknGdyXJ6PB50"
+        "zzM7BE38+1nhKJf4wuPVdIkn8uVdsKVQKFSkMfDr6TjneQJc7G/ip9lRzPH3zJAVF9uq+Z6AugiA"
+        "qUKywrXhFt4z3F+RbjVd16s6+OR40o7NE4UcT0yp5UxccO0+//idW6NZVvA4LrosE9R0NMb2TVAZ"
+        "e4YuuS4lWaLE2K44JdclbuYZti1GFYkR25psX5l6oS8luVyOYDBY9gBwcPns6ABfiHVzf5WmHldT"
+        "XQRA0XUkwNUliXeFW7k7l6rYJh6VqP4DPJnPMDEed6Yq8my7787270dyWY4AT5WviAsqzyPJOMXi"
+        "2Pv2ZL78ledCoUAkUpn5DE+XTO7Jp7g21MLt45vMFBy75u/+UC8BMN74t07zcK7h59UDeyryOpIk"
+        "4bpuRfa7d4AnKnBhLBWV/v1c18VxnMnPqNz+OznEd9tW8mRprBdj4VuuLA1LaHbKyTPdscr+pf4m"
+        "vpoeqdj2WKqqLomtr4SZlUolFKUym3lmXIevpYd5uTeMg0u9bBVWFwFguS4Z26ZX1fhZbrRir6Mo"
+        "igiAJaxYLFakN2DCj3NJlqsGaduuizEAUCcBAGNVsm+n4xQq+MEoiiJW+l3CisVixWoAMNbL9L1s"
+        "vG6q/1AnAdCte1yPJHF7drSiryPLcllHmwnlZdt2xdcI+H42gV9W6NTrY1GQugiAK6Jt3JVLkavw"
+        "iDhZlnHq5NmvHk00AlZSxnH4ZS7FZZHWir5OtdRFALwsEuOXFdgKrJ5JQK9m0KsZS3k90HlxXbfi"
+        "AQDw81ySS+okAGq+G3CD1+96ZKWsG0LOphLdS3MxddCNaZooioKmja0zWCqVsG173t/TZruc4w+j"
+        "KApGIcvufPakjnO875ltTEAlVeMzerKYJ6AorPX43B1mrqbzs+ZrAJc0tfDr/MnNJxeEk+EC9+TT"
+        "XNzUsthFWbCarwG8INzMZ1KDi12Mipp+J7Vt+5jGyPl+Tx9AdmyNhL7SM2spVuK1qqkajwAA95oZ"
+        "3h9u4d+O7K/K61VKTQdAUFFYpunsKFXnZJMkqWIjzarNBfbX+GIj01Xzs9lezNOlGwRlZVEXeF2o"
+        "mn4EONMXcrcWTawqfeiO41R9KWph7mRZrloAWMD2oslpvmBN3w1q+mw+0x/iiSpuBSYCYGlTFKWq"
+        "3bRbSiZnB8JVe71KqOmz+cxAqKo7Adm2jWEYJ/5GYVHoul7VgVpbink2+2t7q7CaDoAe3UOfXb2x"
+        "+ZZlTXZ3CUuPYRhlW6dxLvZbRXprfI+Amg0ARZJoVXUGqviBW5aFrtfPirD1ZmKjlmoZsEt0qHpN"
+        "D6Sq2QBoUXV31LawqjwCQJblqnU1CXO3GD00Bdcl69g0q1rNNgTWbAB06gaHF2EDDcuylkQ7gMfj"
+        "OWpE3mL/fbF5PJ6qbhE24bBVolNfOu/DfNVsAMRUjbhT/TXyi8Ui9bKdWj3x+XyLslbDiGPRotZu"
+        "u1DNDgTSJHlyGfBqKpVKSyIApo+0W+y/LzZd18nnKz8fZDoLF62Gu4ZrtuQKsFjjr5bKY4Awptqt"
+        "/1NZrotSw82ANRsAqiRVbQTgdKZpEg7X9gCQehIOhxetRmIzdjOqVTUdAHOtAZT7l5xYeaaS688J"
+        "c6OqakVWaprrOVNy3clNWGpRzQZA0XWZaw/sWq38rbT5fF7UApaAUChUkbv/+jm27OuSNLkjVS2q"
+        "2QCIWyXCc2x8Ocvw4ZPK+6uWSiV0Xa/oIpTC8SmKgmEYZW/998kyp+tzG+HXJCsk7Op3P5ZLzQZA"
+        "wi4RUeZWBXdcl6sC5d81JpfLVWw3GuHEIpFIRVr+XxOI4szxpt4kq8QXYTxKudRsAMQti4g8twB4"
+        "IDPK6wPNtCnl7a+d2IhiKfUISIqE3ulDUsr3XFqJYy6UYRjIslz2u3+HovG6QJQ/pkfn9P1hWSax"
+        "SD0Q5VCzAZCwSlLTHKvf2/JZdphZ3hMu/xJO2WyWSCSyZIYHR17cRfsb1hB5cdeSPuZCSJJENBol"
+        "lyv/VPAbmtp4Kp9luzm3bcyaFJXRGt4luGYDIOfYJCyLHvXEk3Nc4KMHdvE8T5DzPIGylsNxHEql"
+        "0hJqEByvu5a1YaoSxzx54XCYYrFY9rn/53uDnGP4+Wj/zjl9f4+qk7As8jW8IlBN92P9MTPKuR4/"
+        "fZkTVwO35bN8bfgQ/xht5zWDe0mV8UPL5/MEg0G8Xu+ijEabKnH3QTJPxCkNlK8clTjmyZqYg5BK"
+        "lXcZ+CZZ4QPhVr4ydJAdZm5Ooz2f4/Fzf2a0rOWotpqtAQDcGR/gUm94zuOwPn9kPyOlIu8Lt5W9"
+        "LJlMhkgksui9Aq7tUjycw51rK9YiHfNkyLJMJBIhk8mU/djva2pj1CrxxYG+Of/MJd4wd8YHyl6W"
+        "aqrpAHgwk5Rs1+H8OVbri47DB/t28AJvkL/2hspaFtd1yWQyxGKxWdsDuru72bRpE93d3WV97Xpw"
+        "ovdGkiRaWlrI5XJlr/pf7AtzgSfAe/Y/TWGOx36BN4jlODyUSdbs8z/UeAC4wMcP7Obvw20E5bnd"
+        "ebfkM3z+8D4+2NTO8jm0H8yHZVkUi8UZQ8Dr9dLa2oqmabS2tuL11vZKMuU0l/cmFotRLBbLPuV3"
+        "pWbwvqY2Pnt4P9vzc2v4C8kK7wm38vEDu8palsVQswGwwet3L2qKuSnb4meJQf5fpBN1jg8Dtw4d"
+        "5IHMKJ+OduIt8wChQqGAbdtEo9GyHreRRaNRHMcp+87MPlnm05FO7ksn+OrQwTn9jIrE/4t28uP4"
+        "IFnH5qKmmLvB618araMnQVoKU1vnQ5dlbl6+3k0De+wiKxWdIGC7LjHdw02pQTrHBwjtKBUYti1y"
+        "udwxXUYhReXOtaezxy7xofghnDJPLfb5fNi2TSKRmPy37u5uQqEQqVSK/v7+sr5erZvtvZloVyl3"
+        "l5+MxI3Ny+iRVS57+rFj1vb3+Xz4fD5aFJU12tg4j0O2xfvDrQyYJposMf0cfPe+7VKxxjaPrbkA"
+        "eHdHrzukKvxqymagL/GG6LAdzg1E0BSZ+8wMtutyuuHjiF3ixsP7SGSPrd6tNLzcvuZ0fldI81gh"
+        "zyrNYLVq0KKo+GUZv6wQkGQyjkPWdcg4NsO2xU6rwJ5Sge0lkz3H2VzD7/dj2zbxeLwi70W9i0aj"
+        "KIpCdobPbsJKzWC95pn3Z3e24eN8T4Ardz7BTvPYcIn4/XywYwXtisrjhRyKJHG+J0DBtngok+Sw"
+        "Ih9zDrZYNjcf3l9TbQI1FwDfWrPZfe/oIewpfdKKJPF/Lb18OTXCPWb6qO+/0BviXM3DP+3fwRm+"
+        "sSWcH8ulWe3x8bKmGBc1xVAlmceLObaXCuwqmgw4FlnHIevYZFyHgDR2QvllmXZFZZXmYbVmsEnz"
+        "IEsSv8+n+XU+zZYZNij1er3Isszw8HBd7ChULS0tLTiOM2O36qm6lxd5g5zvDeK4Lk+VTHbN47Nb"
+        "rxmcofsouQ4/Hx3mZ6PD7DZzR50fH+9dy0Mlk19P23X6RZ4gbw7GeP3wvmPOwc81dfC6nX8RAVBJ"
+        "31qz2b1h9NBRawEoksS3Wpfz6oG9M/7MrbFebNfh/kKWXtXgrzx+co7DT3Kj3FfIHvcufiKrNIPz"
+        "PUEu8oVIOjZfT4/wBzNz1AOFYRjous7w8HBVV62tRYqiTDb4TX3ml4DzPAHeFGwmJCvclUvyezOz"
+        "4M/ueUaAl/vDeCSZB8ws+60CzzX8KJLMW4Zn3vfvttaVvHZo7zHn4E1NHby+xgKg5gYCPZwZ5YWe"
+        "4FHVrxd7guy3Zh4MFJQVNEni46NH+GBTByFZ4bPJAe7NZ8ry3L+7VGB3qcDX0yM83xvgbaEWXh2I"
+        "8snEYQbGZ4kVCgUcx6G1tZV4PF72xqx6YRjG5BDfqa39bYrKRyOdhGSFr6aHy/7ZfSMT5/neAG8K"
+        "xmhXNT6ZOMynostm3fdvn13gQk+QX0w5B1/kCfLnTHLBZaq2mqsBzNQI2KNq3FfMc1vm2Gftcz1+"
+        "LvKFebbh59uZON/OxI+qupWbIkm8NhDlbwNRPpU4zP3mM4NWZFnG7/dTKBRIJpPikWCKUCiEz+cj"
+        "k8kc1c9/vjfIPza1V/2ze8jM8PN8iodmmBNwVSDK83QvfVZJNAIulg1ev7vc8LKvkCdt2/xT7xo+"
+        "lDh8zPddHWzm1YEo7x7uZ3uVdhEG2Kh7uam5i08mDvOAefTINZ/Ph6IojIyMLNpadkuFqqo0Nzdj"
+        "WdYxz/vPMfx8JNrBDcMHqv7ZfaG5i29l4nw9PXLM1z8d6eAT+3cSVBQmzsFt+WxNVf0n1GwATPev"
+        "vevcx53SUY8GqzWDL8V6eO/IAZ6aoYGu0k7RvXy2uYvrh/uOeVZVVRWfz4dpmg1ZG5AkiXA4jMfj"
+        "IZfLHROEqzWDL8Z6eP8ifnafb+7iummf3Uu8IU6XNT6w/+mavOCnq5sA8MgyH+pc5Z4VDJN0bLKu"
+        "wym6h1tTI/woN7po5brc38SLvCHeOTzzGPOJyS2jo6MVmd66FHm9XpqamjBNc9b2kP9s6eEX2SQ/"
+        "zi3ec/UV/iauDsbYUszjl2RCssyj6RSfPrRbMmusqj+bmmsEnI0iSaz3+fluJsH2kslG3cMphpff"
+        "FNIn/uEK+kkuydXBZnpUnb4ZGionLgK/308wGCSVSi36jMJK8Xq9hEIhHMchlUrNWutZruosUzTu"
+        "ypd3xt983W2muToU4z4zw7aiyQbNwyW+IMoSWfuhHOomAK6ItLk/yaf4+fhJs9cqIAOXeptoVhTW"
+        "jS/y+HTR5GvpEZJVmsNtuS4Pm1nOMHwzBgCMTSTKZrNIkkQgECAcDpNMJusmCLxeL+FwGMdxyGaz"
+        "J5zMc4bh4+FCrqrLvodlhTcFm486T0Zsm1uSQ9w1XgvZaxUAlysibe7/DR+qixSo2bkA0632+thh"
+        "HV2d3Foyebk/zANmluuH+rh+qI8HzCyfa+6mtczLgx3PsGMTmcNkpYkgyGQyBAIB2tvbCYfDyDW4"
+        "84wsy4TDYdrb2wkEAmQymWNa+GcTlhVG7Oo1jrYqGp9r7j7mPHm5P8y2aY2PT1sFVnvr47EZ6igA"
+        "duVzrFOPXptvk+bhfjPDw4UsLmOzBx8uZPlicoA3Bqs3WScmK8TncUJP3CnT6TSKotDa2kprayse"
+        "j2fJLD02E0mS8Hg8k+WVZZl0Oj2nu/5Uo45NbI4LvpbDG4NRbk4OHHOe/MHMsHHakvLrVYNdc5w1"
+        "WAvq5hHg9viA9NVVp7gSsM0qsFHz8JZQjKtmGB34l2Ke60LlXx9wJipwjifAN2YYo3Airutimiam"
+        "aaKqKsFgkEgkgm3bkxOcyj03fr5kWZ6cOKMoCqVSiXw+v6ARj48XclwTbK7a7k8rVIMnZ+hp+N/U"
+        "MLe1rcBlrDa5QTV4mSfI1Qdra7z/8dRNAOQcmzft3iJdGW1zL/b62JXLUQi45N3FvUBe4Y+wzyrM"
+        "+vw/V5ZlTXaVybKMrusEAmMLoUwMm63EfPnpNE1D1/XJ4c0wtjpyOcNon1Wk3ypxiS/MndnRshzz"
+        "ZORdh4Lj4uTyXOz1sSuf400H90u1vAbgdHUTAAB5x+YbUxpnzgyE3NN1L49PS/fTDd+CxpDP1Sm6"
+        "h7eGYlw/SxfgyXIcZ7JmAGNjCjweD36/H0VRcBwHy7KwbRvLsiiVSti2jeM4uK47a+u7JElIkoQs"
+        "yyiKgqZpqKqKoihHbcFl2zalUqmi+/F9PjnAf8R62FkqVHwcwJ5Sgc26lyemvc4Zho/Hsqmjzql6"
+        "UzfjAGbSqunuV1edwi2ZER40c7i4nOsJ8OZgjH+IH2C4gg1NG3Uvn21exicSh2ccTlppiqKgKAqy"
+        "LE/+N3GBS5KE67qT7QkTf54IBsdxjvpv4qKvtud4Anwk0s77Rg6wrVi5sIkpKp+JLuPW9DAPj58n"
+        "f+UJ8NZAM9fsfpLBUlEEQK0KKSr/0r3GPdMfIuXY/KmY4+vpkbKuCjyVIkm8LhDlqvG5AH8wy7+A"
+        "ZSN5rifAhyMdfDcT55sVnAsQlBWuDjZztu4jJCs8mk3x0f6dUrKKvRGLoa4eAWaSsi3+bt82qUMz"
+        "3H/tWcuzdB9bjTy/LdOMsgmKJPECT5A3B5tpUzUGa3i7qKUmZdu8IdDMS70hbk0PV+SzO8fwc7bu"
+        "Y7hock3fTo6UCnV715+q7msAU0nAC0JR99q2blo0nV/kU/zezLJrARNNVmsGF3iCvNQbZKBY4JbB"
+        "AzyRTUlvae1yr25Zxp5SgW9kRvhNPl3mRcfq27MMP28Lxlive7g9PsC/D/SxyRug0p/d71JxqZE+"
+        "p4YKgKnO8Afdl4ZjvDjcjCLLbCnk2W0X2V0qMGCXSI/PJ8g4DgFZJiApBGSZdkVjlWawStHZZHix"
+        "HYe7kyPcNTrME7n0UXeNXsPrvr21i0sjLewtFflGJs7v8inqu1J58lTghb4Qr/dHWa7p3B4f5JbB"
+        "A/QXzaPe12p8do2iYQNgqlWG1z3FF2C9N8B6r582zSAgywRllaCikLZt0o5FxnEYKBXYns+yLZfh"
+        "qXyG3YX8CU+cTt1w39qyjFc1t5NxHG7PJvhRLkmizp8v5yoiK1zmb+KV/gg+Seb7I0f436GDc6qG"
+        "V/qzq3ciAKooICtcEmlxr2lZRrfu4aFClp/nktxrZqo67n0pkJE4y/DxMl+IF3pDDJaKfGfkMLeN"
+        "HKn7hrelRATAIpCROD/U5L4q2s6LQhFGHYe78yl+k0/xVNGs27YCCdike3mhN8hLvCFCksyv03F+"
+        "MDLA/elRqdxLswsnJgJgkTUpKq+ItLqXRFo43RdgyLb4XT7DHwsZHivkKNZ4zcCQJM4wfJznCXCB"
+        "J0BMUXk0m+Zno8P8ODEo7vaLTATAEtKm6e5fjzdune0PYgOPFHL8qZDjiWKOnaXCkn9UUCWJtZqH"
+        "zbqXZxk+zjR8yC78OZfi7uQIv0yO1PXAmlojAmCJ8isKzwk0uecHmzg30MRKw0vWsdlSNNlWMnm6"
+        "ZLKjZHJwkccbLFM11mke1mkeNmgGp+g+vLLMnkKeBzOj/D6V4IFMUsrV0fj5eiICoEY0qxpn+UPu"
+        "Wf4Qp/qCbPD6J5et7rOK9JWK9NlFDlolBh2LYdti0C4t+BFClyRaFY2YotImqyxTNXpUnR5Vp1vV"
+        "J8uwNZ9hSy7Dn7MpHsmmpLgYCFUTRADUKAnoMbzuRq+fXt3DCo+PVYaPZbpOTNUnt0nNOA6p8W6w"
+        "tGtTcF3y46FgjTe6TWyq6pUkDEkiON5vHpJVAuOLkbjAsFXkYLHA7kKevWaOfUWTbfksfYV8Qw2e"
+        "qSciAOqQJsm0aJrbrhk0qxohWSGkaoQUBUOS8cgy+rRdkYuug+k4mK5D2rZJWSWSjk3cKnG4WGDY"
+        "KkqlJd7+IMyfCABBaGB1sySYIAjzJwJAEBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAASh"
+        "gYkAEIQGJgJAEBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABB"
+        "aGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAAShgYkAEIQGJgJA"
+        "EBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAAShgYkAEIQGJgJAEBqYCABBaGAiAAShgYkA"
+        "EIQGJgJAEBqYCABBaGAiAAShgf1/edx4dao1MLAAAAAASUVORK5CYII="
     )
     try:
         _logo_data = base64.b64decode(_LOGO_B64)
         _logo_pil  = Image.open(io.BytesIO(_logo_data))
         _logo_pil.load()  # force full decode before resize
         _logo_pil  = _logo_pil.convert("RGBA")
-        _logo_pil  = _logo_pil.resize((52, 52), Image.LANCZOS)
+        _logo_pil  = _logo_pil.resize((96, 96), Image.LANCZOS)
         _logo_photo = ImageTk.PhotoImage(_logo_pil)
         _logo_lbl = tk.Label(_body, image=_logo_photo, bg="#0a0a0a")
         _logo_lbl.image = _logo_photo  # prevent GC
@@ -1304,6 +1510,26 @@ def main():
     # ══════════════════════════════════════════════════════════════════════════
     root = tk.Tk()
     root.title(f"HardwareToad {APP_VERSION}")
+
+    # ── Window / taskbar / title bar icon ─────────────────────────────────────
+    try:
+        import base64 as _b64, io as _io
+        _icon_rgba = Image.open(_io.BytesIO(_b64.b64decode(_LOGO_B64))).convert("RGBA")
+        # Composite onto #0a0a0a for title bar — transparent PNG causes tkinter
+        # to show the default feather icon instead of our logo
+        def _on_dark(pil_img, size):
+            bg = Image.new("RGBA", (size, size), (10, 10, 10, 255))
+            fg = pil_img.resize((size, size), Image.LANCZOS)
+            bg.paste(fg, (0, 0), fg)
+            return ImageTk.PhotoImage(bg.convert("RGB"))
+        _icon_lg = _on_dark(_icon_rgba, 256)
+        _icon_sm = _on_dark(_icon_rgba, 32)
+        root.iconphoto(True, _icon_lg, _icon_sm)
+        root._icon_lg = _icon_lg
+        root._icon_sm = _icon_sm
+    except Exception:
+        pass
+
     root.configure(bg=BG)
     root.resizable(True, True)
     root.minsize(900, 700)
@@ -1370,10 +1596,6 @@ def main():
     # Right: toolbar + status
     toolbar = tk.Frame(header_bar, bg="#0f0f0f")
     toolbar.pack(side="right", padx=(0, 12))
-
-    status_label = tk.Label(toolbar, text="Connecting...", fg="#808080", bg="#0f0f0f",
-                            font=("Segoe UI", 9))
-    status_label.pack(side="right", padx=(8, 0), pady=8)
 
     def _toolbar_btn(text, cmd):
         b = tk.Button(toolbar, text=text, bg="#0f0f0f", fg="#888888",
@@ -1562,7 +1784,7 @@ def main():
     def ring_pair(parent, bg=None):
         if bg is None: bg = BLOCK_BG
         f = tk.Frame(parent, bg=bg)
-        f.pack(anchor="center", pady=(0, 8))
+        f.pack(anchor="w", pady=(0, 8))
         cl = tk.Canvas(f, width=RS, height=RS, bg=bg, highlightthickness=0)
         cl.pack(side="left", padx=24)
         cr = tk.Canvas(f, width=RS, height=RS, bg=bg, highlightthickness=0)
@@ -1572,7 +1794,7 @@ def main():
     def single_ring(parent, bg=None):
         if bg is None: bg = BLOCK_BG
         f = tk.Frame(parent, bg=bg)
-        f.pack(anchor="center", pady=(0, 8))
+        f.pack(anchor="w", pady=(0, 8))
         c = tk.Canvas(f, width=RS, height=RS, bg=bg, highlightthickness=0)
         c.pack(padx=24)
         return c
@@ -1580,7 +1802,7 @@ def main():
     def stat_strip(parent, specs, bg=None):
         if bg is None: bg = BLOCK_BG
         f = tk.Frame(parent, bg=bg)
-        f.pack(anchor="center", pady=(4, 0))
+        f.pack(anchor="w", pady=(4, 0))
         labels = []
         for lbl, accent in specs:
             col = tk.Frame(f, bg=bg)
@@ -1604,7 +1826,7 @@ def main():
     cpu_rings_col.pack(side="left")
     cpu_ring_load, cpu_ring_temp = ring_pair(cpu_rings_col)
     cpu_stats_f = tk.Frame(cpu_rings_col, bg=BLOCK_BG)
-    cpu_stats_f.pack(anchor="center", pady=(4, 0))
+    cpu_stats_f.pack(anchor="w", pady=(4, 0))
     cpu_clock_lbl, cpu_power_lbl, cpu_voltage_lbl = stat_strip(cpu_stats_f, [
         ("CLOCK",   "#cccccc"),
         ("POWER",   "#cccccc"),
@@ -1708,7 +1930,7 @@ def main():
     ram_rings_col.pack(side="left")
 
     ram_rings_f = tk.Frame(ram_rings_col, bg=BLOCK_BG)
-    ram_rings_f.pack(anchor="center", pady=(0, 8))
+    ram_rings_f.pack(anchor="w", pady=(0, 8))
     ram_ring_usage = tk.Canvas(ram_rings_f, width=RS, height=RS,
                                bg=BLOCK_BG, highlightthickness=0)
     ram_ring_usage.pack(side="left", padx=24)
@@ -1860,12 +2082,19 @@ def main():
             if col and not col.winfo_ismapped(): col.pack(side="left", padx=18)
 
     def update_sensors():
-        if not bridge.fetch():
-            status_label.config(text="⬤  Offline", fg="#e63946")
-            root.after(2000, update_sensors)
-            return
+        # ── Throttle during stress test — skip heavy graph/ring redraws ───────
+        # When a stress test is running, we slow the poll to 5s and skip all
+        # PIL image renders (rings + graphs) — only text labels update.
+        # This keeps the UI responsive without interfering with the stress engine.
+        _stress_active = any(
+            ev is not None and not ev.is_set()
+            for ev in stress_manager._stop_events.values()
+        )
+        _poll_interval = 5000 if _stress_active else 2000
 
-        status_label.config(text="⬤  Live", fg="#2ecc71")
+        if not bridge.fetch():
+            root.after(_poll_interval, update_sensors)
+            return
 
         cpu_temp = bridge.get_cpu_temp()
         cpu_usage = None
@@ -1894,11 +2123,12 @@ def main():
                 cpu_voltage = v
 
         graph_cpu_temps.append(cpu_temp)
-        draw_single_graph(cpu_graph_canvas, graph_cpu_temps, COL_CPU, 85)
-        draw_ring(cpu_ring_load, cpu_usage, "LOAD", ACCENT_CPU, BLOCK_BG,
-                  max_val=100, unit="%")
-        draw_ring(cpu_ring_temp, cpu_temp,  "TEMP", temp_color(cpu_temp), BLOCK_BG,
-                  max_val=105, unit="°C")
+        if not _stress_active:
+            draw_single_graph(cpu_graph_canvas, graph_cpu_temps, COL_CPU, 85)
+            draw_ring(cpu_ring_load, cpu_usage, "LOAD", ACCENT_CPU, BLOCK_BG,
+                      max_val=100, unit="%")
+            draw_ring(cpu_ring_temp, cpu_temp,  "TEMP", temp_color(cpu_temp), BLOCK_BG,
+                      max_val=105, unit="°C")
         if cpu_temp is None:
             # Only show warning if bridge has had time to populate data
             # (empty dict on first poll = still loading, not a real error)
@@ -1950,14 +2180,16 @@ def main():
                 ram_temp = v
                 break
 
-        draw_ring(ram_ring_usage, ram.percent, "USAGE", ACCENT_CPU, BLOCK_BG, max_val=100, unit="%")
+        if not _stress_active:
+            draw_ring(ram_ring_usage, ram.percent, "USAGE", ACCENT_CPU, BLOCK_BG, max_val=100, unit="%")
 
         if ram_temp is not None:
             if not ram_temp_visible[0]:
                 ram_ring_temp.pack(side="left", padx=24)
                 ram_temp_visible[0] = True
-            draw_ring(ram_ring_temp, ram_temp, "TEMP", temp_color(ram_temp),
-                      BLOCK_BG, max_val=90, unit="°C")
+            if not _stress_active:
+                draw_ring(ram_ring_temp, ram_temp, "TEMP", temp_color(ram_temp),
+                          BLOCK_BG, max_val=90, unit="°C")
             ram_temp_history.append(ram_temp)
             if not ram_graph_visible[0]:
                 ram_graph_visible[0] = True
@@ -1965,7 +2197,8 @@ def main():
                          bg=BLOCK_BG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
                 ram_temp_graph_hdr.pack(fill="x", pady=(0, 2))
                 ram_temp_graph_canvas.pack(fill="x", pady=(0, 4))
-            draw_single_graph(ram_temp_graph_canvas, ram_temp_history, ACCENT_CPU, 85)
+            if not _stress_active:
+                draw_single_graph(ram_temp_graph_canvas, ram_temp_history, ACCENT_CPU, 85)
 
         ram_used_lbl.config(text=f"{ram.used/1024**3:.1f} GB")
         ram_free_lbl.config(text=f"{ram.available/1024**3:.1f} GB")
@@ -2039,13 +2272,15 @@ def main():
                 acc = lbls["acc"]
 
                 if lbls.get("primary", False):
-                    draw_ring(lbls["ring_load"], g_usage, "LOAD", ACCENT_CPU, BLOCK_BG,
-                              max_val=100, unit="%")
+                    if not _stress_active:
+                        draw_ring(lbls["ring_load"], g_usage, "LOAD", ACCENT_CPU, BLOCK_BG,
+                                  max_val=100, unit="%")
                     rt = lbls["ring_temp"]
                     if g_temp is not None:
                         if not rt.winfo_ismapped(): rt.pack(side="left", padx=24)
-                        draw_ring(rt, g_temp, "TEMP", temp_color(g_temp), BLOCK_BG,
-                                  max_val=110, unit="°C")
+                        if not _stress_active:
+                            draw_ring(rt, g_temp, "TEMP", temp_color(g_temp), BLOCK_BG,
+                                      max_val=110, unit="°C")
                     else:
                         if rt.winfo_ismapped(): rt.pack_forget()
                     def _stat_update(lbl, value, fmt_fn, color):
@@ -2088,7 +2323,8 @@ def main():
                                 c = GPU_TEMP_COLORS.get(name, COL_GPU)
                                 tk.Label(lf, text=f"◆ {name}", fg=c, bg=BLOCK_BG,
                                          font=("Segoe UI", 7, "bold")).pack(side="left", padx=(0,8))
-                        draw_multi_graph(lbls["graph_canvas"], series, 170)
+                        if not _stress_active:
+                            draw_multi_graph(lbls["graph_canvas"], series, 170)
                     else:
                         if gc.winfo_ismapped(): gc.pack_forget()
                 # Secondary GPU → right panel compact section
@@ -2308,7 +2544,7 @@ def main():
         d, h = divmod(h, 24)
         sys_uptime_lbl.config(text=f"{d}d {h}h {m}m" if d > 0 else f"{h}h {m}m", fg="#cccccc")
 
-        root.after(2000, update_sensors)
+        root.after(_poll_interval, update_sensors)
 
     # Bridge thread is done before main window opens — run first poll immediately
     root.after(100, update_sensors)
@@ -2468,7 +2704,88 @@ def main():
             col = i % COLS
             if i > 0 and col == 0:
                 grid_row += 1
-            start_fn, stop_fn = stress_manager.make_stress_action(t["cmd"], t["cmd"])
+
+            # ── sensor_fn: fetches live data directly from bridge each poll ──
+            # Uses bridge._make_request() so it always has fresh data even
+            # when update_sensors() is throttled to 5s during stress.
+            def _make_sensor_fn(cmd=t["cmd"]):
+                import json as _json
+
+                def _fetch_sensors():
+                    """Fresh snapshot direct from bridge — bypasses cache."""
+                    try:
+                        r = bridge._make_request("/sensors", timeout=1)
+                        return _json.loads(r.read())
+                    except Exception:
+                        return bridge.get_data_snapshot()  # fall back to cache
+
+                def _cpu_temp_live():
+                    try:
+                        r = bridge._make_request("/cpu-temp", timeout=1)
+                        val = r.read().decode().strip()
+                        return float(val) if val != "null" else None
+                    except Exception:
+                        return bridge.get_cpu_temp()
+
+                def _cpu_only():
+                    parts = []
+                    temp = _cpu_temp_live()
+                    if temp is not None:
+                        parts.append(f"CPU {temp:.0f}°C")
+                    snap = _fetch_sensors()
+                    for key, sensors in snap.items():
+                        if "cpu" not in key.lower(): continue
+                        pwr = bridge.sensor_value_in(sensors, ["Package", "CPU Package", "CPU"], "Power")
+                        if pwr is not None:
+                            parts.append(f"{pwr:.0f}W")
+                            break
+                    for key, sensors in snap.items():
+                        if "cpu" not in key.lower(): continue
+                        v = bridge.sensor_value_in(sensors, ["CPU Core", "VCore", "Core"], "Voltage")
+                        if v is not None:
+                            parts.append(f"{v:.3f}V")
+                            break
+                    return "  ".join(parts)
+
+                def _mem_only():
+                    parts = []
+                    temp = _cpu_temp_live()
+                    if temp is not None:
+                        parts.append(f"CPU {temp:.0f}°C")
+                    import psutil as _ps
+                    ram = _ps.virtual_memory()
+                    parts.append(f"RAM {ram.percent:.0f}%  {ram.used/1024**3:.1f}/{ram.total/1024**3:.1f}GB")
+                    return "  ".join(parts)
+
+                def _combined():
+                    parts = []
+                    temp = _cpu_temp_live()
+                    if temp is not None:
+                        parts.append(f"CPU {temp:.0f}°C")
+                    snap = _fetch_sensors()
+                    for key, sensors in snap.items():
+                        if "cpu" not in key.lower(): continue
+                        pwr = bridge.sensor_value_in(sensors, ["Package", "CPU Package", "CPU"], "Power")
+                        if pwr is not None:
+                            parts.append(f"{pwr:.0f}W")
+                            break
+                    import psutil as _ps
+                    ram = _ps.virtual_memory()
+                    parts.append(f"RAM {ram.percent:.0f}%")
+                    return "  ".join(parts)
+
+                _MAP = {
+                    "cpu_single": _cpu_only,
+                    "cpu_multi":  _cpu_only,
+                    "linpack":    _cpu_only,
+                    "memory":     _mem_only,
+                    "combined":   _combined,
+                }
+                return _MAP.get(cmd, _cpu_only)
+
+            start_fn, stop_fn = stress_manager.make_stress_action(
+                t["cmd"], t["cmd"], sensor_fn=_make_sensor_fn()
+            )
             stress_log_boxes[t["cmd"]] = None
             card = tk.Frame(mi, bg="#121212",
                             highlightbackground=t["accent"],
@@ -2887,7 +3204,7 @@ def main():
             except tk.TclError:
                 stress_win_alive[0] = False
                 return
-            root.after(500, update_stress_temps)
+            root.after(2000, update_stress_temps)
 
         threading.Thread(target=_fetch, daemon=True).start()
 

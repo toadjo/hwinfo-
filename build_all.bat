@@ -74,7 +74,35 @@ if errorlevel 1 (
 )
 echo Done.
 
-:: ── Build EXE ────────────────────────────────────────────────────────────────
+:: ── Obfuscate LHMBridge with Obfuscar ───────────────────────────────────────
+echo [2b/5] Obfuscating LHMBridge...
+where obfuscar.console >nul 2>&1
+if %errorlevel% neq 0 (
+    :: Try local .NET tool
+    if exist "%~dp0.tools\obfuscar\obfuscar.console.exe" (
+        set OBFUSCAR="%~dp0.tools\obfuscar\obfuscar.console.exe"
+    ) else (
+        echo [SKIP] Obfuscar not found. Install with:
+        echo        dotnet tool install --tool-path .tools\obfuscar Obfuscar.GlobalTool
+        echo        ^(run once, then rebuild^)
+        goto :skip_obfuscar
+    )
+) else (
+    set OBFUSCAR=obfuscar.console
+)
+
+if not exist "%~dp0obfuscar.xml" (
+    echo [SKIP] obfuscar.xml not found in project root — skipping obfuscation.
+    goto :skip_obfuscar
+)
+
+%OBFUSCAR% "%~dp0obfuscar.xml"
+if errorlevel 1 (
+    echo WARNING: Obfuscar failed — continuing without obfuscation.
+)
+
+:skip_obfuscar
+echo Done.
 echo [3/5] Building EXE with PyInstaller...
 %PYTHON% -m PyInstaller hardware_toad.spec --noconfirm --clean
 if errorlevel 1 (
