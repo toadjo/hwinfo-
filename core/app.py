@@ -2958,9 +2958,6 @@ def main():
         gpu_stop_btn.config(state="normal" if running else "disabled")
         if not running:
             gpu_status_lbl.config(text="", fg=ACCENT_GPU)
-            gpu_temp_lbl.config(text="Temp: —")
-            gpu_power_lbl.config(text="Power: —")
-            gpu_load_lbl.config(text="Load: —")
 
     def _gpu_start(mode, name):
         if _gpu_running[0]:
@@ -3034,34 +3031,33 @@ def main():
             return
         def _fetch_and_apply():
             try:
-                temp = power = load = None
-                # Use bridge methods which handle Type/Value casing correctly
+                temp = power = load = volt = None
                 temp = bridge.get_primary_gpu_temp()
-                # Get power and load from snapshot
                 for key in bridge.get_gpu_keys():
                     sensors = bridge.get_sensor_snapshot(key)
                     if power is None:
                         power = bridge.sensor_value_in(sensors, ["GPU Package", "GPU Chip", "Package"], "Power")
                     if load is None:
                         load = bridge.sensor_value_in(sensors, ["GPU Core", "Core"], "Load")
-                    if temp is not None and power is not None and load is not None:
+                    if volt is None:
+                        volt = bridge.sensor_value_in(sensors, ["GPU Core", "Core", "GPU"], "Voltage")
+                    if all(x is not None for x in [temp, power, load, volt]):
                         break
+
                 def _apply():
                     if not _gpu_running[0]: return
-                    gpu_temp_lbl.config(
-                        text=f"Temp: {temp:.0f}°C" if temp is not None else "Temp: —",
-                        fg=temp_color(temp) if temp is not None else "#888888")
-                    gpu_power_lbl.config(
-                        text=f"Power: {power:.0f}W" if power is not None else "Power: —",
-                        fg="#cccccc" if power is not None else "#888888")
-                    gpu_load_lbl.config(
-                        text=f"Load: {load:.0f}%" if load is not None else "Load: —",
-                        fg="#cccccc" if load is not None else "#888888")
-                    root.after(2000, _gpu_poll_sensors)
+                    parts = []
+                    if temp  is not None: parts.append(f"Temp: {temp:.0f}°C")
+                    if load  is not None: parts.append(f"Load: {load:.0f}%")
+                    if power is not None: parts.append(f"Power: {power:.0f}W")
+                    if volt  is not None: parts.append(f"Volt: {volt:.3f}V")
+                    if parts:
+                        _gpu_log_write("[GPU] " + " | ".join(parts))
+                    root.after(5000, _gpu_poll_sensors)
                 root.after(0, _apply)
             except Exception:
                 if _gpu_running[0]:
-                    root.after(0, lambda: root.after(2000, _gpu_poll_sensors))
+                    root.after(0, lambda: root.after(5000, _gpu_poll_sensors))
         threading.Thread(target=_fetch_and_apply, daemon=True).start()
 
     # ── GPU test cards (menu) ─────────────────────────────────────────────────
@@ -3138,13 +3134,6 @@ def main():
                               bg="#0f0f0f", fg=ACCENT_GPU,
                               font=("Segoe UI", 10))
     gpu_status_lbl.pack(side="left", padx=(0, 12))
-
-    gpu_temp_lbl  = tk.Label(gpu_hdr, text="Temp: —",  bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
-    gpu_power_lbl = tk.Label(gpu_hdr, text="Power: —", bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
-    gpu_load_lbl  = tk.Label(gpu_hdr, text="Load: —",  bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
-    gpu_temp_lbl.pack(side="left",  padx=8)
-    gpu_power_lbl.pack(side="left", padx=8)
-    gpu_load_lbl.pack(side="left",  padx=8)
 
     gpu_stop_btn = tk.Button(gpu_hdr, text="  ■ Stop  ",
                              bg="#e63946", fg="white",
