@@ -1,5 +1,5 @@
 {
-  "version": "0.7.5",
+  "version": "0.8.0",
   "download_url": "https://github.com/toadjo/HardwareToad/releases/latest",
-  "changelog": "Security layer, stress engine upgrades, UI fixes, transparent logo, installer fix"
+  "changelog": "GPU stress engine (DX12), GPU Core/VRAM/Combined tests, active view UI, installer includes GPUStress"
 }

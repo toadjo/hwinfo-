@@ -5,6 +5,27 @@ All notable changes to HardwareToad will be documented here.
 
 ---
 
+## [v0.8.0 Beta] - 2026-04-02
+
+### Added
+- **GPU Stress Engine** — native DX12 stress testing via `GPUStress.exe`
+  - **GPU Core Test** — dispatches 16M FMA compute threads via compute shader
+  - **VRAM Test** — continuous 256MB GPU memory transfers to saturate bandwidth
+  - **Combined** — Compute + VRAM + Rasterizer simultaneously
+  - Rasterizer pipeline: 3000 procedural triangles at 1080p with heavy per-pixel math
+  - Universal GPU support: feature level fallback (DX12.1 → DX12.0 → DX11.1 → DX11.0)
+  - Live log output with elapsed time + iteration count every 5 seconds
+- **GPU Stress UI** — active view (same style as CPU tests) with Back button, Temp/Power/Load status bar, full scrollable log
+- GPU stress cards now match CPU card style — red border, badge (GPU/VRAM/ALL), full card click, hover effect
+- `build_all.bat` auto-builds GPUStress and packages it in the installer
+- GPUStress.exe included in installer — end users get GPU stress with zero setup
+
+### Fixed
+- GPU stress log queue stale sentinel bug — second test run no longer terminates immediately
+- GPU sensor polling now runs in background thread — no more LHMBridge timeouts during stress
+
+---
+
 ## [v0.7.5 Beta] - 2026-04-01
 
 ### Added

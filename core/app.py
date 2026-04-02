@@ -2574,6 +2574,8 @@ def main():
         _tabs[tab_name]["active"].place_forget()
         if "ram_active" in _tabs[tab_name]:
             _tabs[tab_name]["ram_active"].place_forget()
+        if "gpu_active" in _tabs[tab_name]:
+            _tabs[tab_name]["gpu_active"].place_forget()
         _tabs[tab_name][page].place(relx=0, rely=0, relwidth=1, relheight=1)
 
     # Single "cpu" tab holds everything (menu + active views)
@@ -2913,7 +2915,7 @@ def main():
     _select_ram_size(0)
     grid_row += 1
 
-    # ── GPU Stress — Coming Soon card ─────────────────────────────────────────
+    # ── GPU Stress Tests ───────────────────────────────────────────────────────
     tk.Frame(mi, bg="#1e1e1e", height=1).grid(row=grid_row, column=0, columnspan=COLS, sticky="ew", padx=16, pady=(12, 0))
     grid_row += 1
     tk.Label(mi, text="GPU Stress Test", bg=BG, fg="#a0a0a0",
@@ -2921,18 +2923,261 @@ def main():
              row=grid_row, column=0, columnspan=COLS, sticky="w", padx=16, pady=(8, 4))
     grid_row += 1
 
-    gpu_card = tk.Frame(mi, bg="#121212",
-                        highlightbackground="#333333", highlightthickness=2)
-    gpu_card.grid(row=grid_row, column=0, columnspan=COLS, padx=10, pady=8, sticky="ew", ipady=12)
-    tk.Label(gpu_card, text="🚧  Coming Soon", bg="#121212", fg="#555555",
-             font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=16, pady=(10, 4))
-    tk.Label(gpu_card,
-             text="GPU stress testing requires a rendering engine (OpenGL/Vulkan)\nto reach maximum thermal load. Planned for a future release.",
-             bg="#121212", fg="#555555",
-             font=("Segoe UI", 9), justify="left").pack(anchor="w", padx=16, pady=(0, 10))
-    grid_row += 1
+    _GPU_TESTS = [
+        ("GPU Core Test", "compute", "Hammers shader cores with FMA compute ops",      "GPU",  "#e63946"),
+        ("VRAM Test",     "vram",    "Saturates VRAM bandwidth with 256MB transfers",  "VRAM", "#e63946"),
+        ("Combined",      "all",     "Full GPU stress — compute + VRAM + rasterizer",  "ALL",  "#e63946"),
+    ]
 
+    _gpu_proc      = [None]
+    _gpu_running   = [False]
+    _gpu_test_name = [""]
+    _gpu_log_queue = queue.Queue()
+
+    def _gpu_exe_path():
+        import os, sys
+        # Installed: GPUStress subfolder next to HardwareToad.exe
+        if getattr(sys, 'frozen', False):
+            return os.path.join(os.path.dirname(sys.executable), "GPUStress", "GPUStress.exe")
+        # Dev: repo_root/GPUStress/build/
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "GPUStress", "build", "GPUStress.exe")
+
+    def _gpu_stop():
+        if _gpu_proc[0] and _gpu_proc[0].poll() is None:
+            try: _gpu_proc[0].terminate()
+            except Exception: pass
+        _gpu_proc[0]    = None
+        _gpu_running[0] = False
+        _gpu_refresh_ui()
+    def _gpu_refresh_ui():
+        running = _gpu_running[0]
+        for card, _, _ in _gpu_btn_refs:
+            card.config(cursor="hand2" if not running else "arrow",
+                        highlightbackground="#e63946" if not running else "#555555")
+        gpu_stop_btn.config(state="normal" if running else "disabled")
+        if not running:
+            gpu_status_lbl.config(text="", fg=ACCENT_GPU)
+            gpu_temp_lbl.config(text="Temp: —")
+            gpu_power_lbl.config(text="Power: —")
+            gpu_load_lbl.config(text="Load: —")
+
+    def _gpu_start(mode, name):
+        if _gpu_running[0]:
+            return
+        import subprocess, os
+        exe = _gpu_exe_path()
+        if not os.path.exists(exe):
+            gpu_status_lbl.config(text="GPUStress.exe not found!", fg="#ef4444")
+            return
+        # Clear stale queue items
+        try:
+            while True: _gpu_log_queue.get_nowait()
+        except Exception: pass
+        try:
+            _gpu_proc[0] = subprocess.Popen(
+                [exe, "--mode", mode],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+        except Exception as e:
+            gpu_status_lbl.config(text=f"Error: {e}", fg="#ef4444")
+            return
+        _gpu_running[0]   = True
+        _gpu_test_name[0] = name
+        gpu_status_lbl.config(text=f"Running: {name}", fg=ACCENT_GPU)
+        gpu_title_lbl.config(text=f"GPU Stress — {name}")
+        _gpu_refresh_ui()
+        # Clear log and switch to active view
+        gpu_log.config(state="normal")
+        gpu_log.delete("1.0", "end")
+        gpu_log.config(state="disabled")
+        _show_gpu_active()
+        _gpu_log_write(f"▶ Started: {name}")
+        def _reader(proc):
+            try:
+                for raw in iter(proc.stdout.readline, b''):
+                    line = raw.decode("utf-8", errors="replace").rstrip()
+                    if line: _gpu_log_queue.put(line)
+            except Exception: pass
+            # Also drain stderr
+            try:
+                for raw in iter(proc.stderr.readline, b''):
+                    line = raw.decode("utf-8", errors="replace").rstrip()
+                    if line: _gpu_log_queue.put(line)
+            except Exception: pass
+            _gpu_log_queue.put(None)  # sentinel
+        threading.Thread(target=_reader, args=(_gpu_proc[0],), daemon=True).start()
+        _gpu_drain_log()
+        _gpu_poll_sensors()
+
+    def _gpu_log_write(msg):
+        gpu_log.config(state="normal")
+        gpu_log.insert("end", msg + "\n")
+        gpu_log.see("end")
+        gpu_log.config(state="disabled")
+
+    def _gpu_drain_log():
+        try:
+            while True:
+                item = _gpu_log_queue.get_nowait()
+                if item is None:
+                    _gpu_log_write("■ Stress test ended.")
+                    _gpu_stop()
+                    return
+                _gpu_log_write(item)
+        except Exception: pass
+        if _gpu_running[0]:
+            root.after(100, _gpu_drain_log)
+    def _gpu_poll_sensors():
+        if not _gpu_running[0]:
+            return
+        def _fetch_and_apply():
+            try:
+                import urllib.request as _ur, json as _j
+                r = _ur.urlopen(_ur.Request(
+                    f"http://127.0.0.1:{bridge.port}/sensors",
+                    headers={"X-HardwareToad-Token": get_bridge_token()}
+                ), timeout=2)
+                data = _j.loads(r.read())
+                temp = power = load = None
+                for hw_name, sensors in data.items():
+                    if "gpu" not in hw_name.lower(): continue
+                    temp  = next((s["value"] for s in sensors if s["type"] == "Temperature" and "core" in s["name"].lower()), None)
+                    power = next((s["value"] for s in sensors if s["type"] == "Power"), None)
+                    load  = next((s["value"] for s in sensors if s["type"] == "Load" and "core" in s["name"].lower()), None)
+                    break
+                def _apply():
+                    if not _gpu_running[0]: return
+                    gpu_temp_lbl.config(
+                        text=f"Temp: {temp:.0f}°C" if temp is not None else "Temp: —",
+                        fg=temp_color(temp) if temp is not None else "#888888")
+                    gpu_power_lbl.config(
+                        text=f"Power: {power:.0f}W" if power is not None else "Power: —")
+                    gpu_load_lbl.config(
+                        text=f"Load: {load:.0f}%" if load is not None else "Load: —")
+                    root.after(2000, _gpu_poll_sensors)
+                root.after(0, _apply)
+            except Exception:
+                if _gpu_running[0]:
+                    root.after(0, lambda: root.after(2000, _gpu_poll_sensors))
+        threading.Thread(target=_fetch_and_apply, daemon=True).start()
+
+    # ── GPU test cards (menu) ─────────────────────────────────────────────────
+    gpu_cards_frame = tk.Frame(mi, bg=BG)
+    gpu_cards_frame.grid(row=grid_row, column=0, columnspan=COLS, padx=10, pady=4, sticky="ew")
+    for c in range(3):
+        gpu_cards_frame.columnconfigure(c, weight=1)
+
+    _gpu_btn_refs = []
+    for col, (name, mode, desc, badge, accent) in enumerate(_GPU_TESTS):
+        card = tk.Frame(gpu_cards_frame, bg="#121212",
+                        highlightbackground=accent,
+                        highlightthickness=2, cursor="hand2")
+        card.grid(row=0, column=col, padx=10, pady=8, sticky="nsew", ipady=6)
+        tk.Label(card, text=badge, bg=accent, fg="white",
+                 font=("Segoe UI", 8, "bold"), padx=8, pady=3).pack(
+                 anchor="nw", padx=10, pady=(10, 4))
+        tk.Label(card, text=name, bg="#121212", fg="white",
+                 font=("Segoe UI", 10, "bold"),
+                 wraplength=280, justify="left").pack(anchor="w", padx=10)
+        tk.Label(card, text=desc, bg="#121212", fg="#909090",
+                 font=("Segoe UI", 9)).pack(anchor="w", padx=10, pady=(2, 10))
+
+        def _on_click(e=None, m=mode, n=name): _gpu_start(m, n)
+        card.bind("<Button-1>", _on_click)
+        for w in card.winfo_children():
+            w.bind("<Button-1>", _on_click)
+
+        # Hover feedback
+        def _enter(e, c=card, a=accent):
+            c.config(bg="#1c1c1c")
+            for ch in c.winfo_children():
+                try:
+                    if ch.cget("bg") in ("#121212",): ch.config(bg="#1c1c1c")
+                except Exception: pass
+        def _leave(e, c=card, a=accent):
+            c.config(bg="#121212")
+            for ch in c.winfo_children():
+                try:
+                    if ch.cget("bg") in ("#1c1c1c",): ch.config(bg="#121212")
+                except Exception: pass
+        card.bind("<Enter>", _enter)
+        card.bind("<Leave>", _leave)
+        for w in card.winfo_children():
+            w.bind("<Enter>", _enter)
+            w.bind("<Leave>", _leave)
+
+        btn = card  # keep ref for disable/enable
+        _gpu_btn_refs.append((btn, mode, name))
+
+    grid_row += 1
     tk.Frame(mi, bg=BG, height=20).grid(row=grid_row, column=0, columnspan=COLS)
+
+    # ── GPU active view ───────────────────────────────────────────────────────
+    gpu_active = tk.Frame(stress_content, bg=BG)
+    gpu_active.columnconfigure(0, weight=1)
+    gpu_active.rowconfigure(1, weight=1)
+
+    gpu_hdr = tk.Frame(gpu_active, bg="#0f0f0f")
+    gpu_hdr.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+    tk.Button(gpu_hdr, text="< Back",
+              bg="#0f0f0f", fg="#b0b0b0",
+              font=("Segoe UI", 9), relief="flat", bd=0,
+              padx=12, pady=10, cursor="hand2",
+              command=lambda: _show_gpu_menu()).pack(side="left")
+
+    gpu_title_lbl = tk.Label(gpu_hdr, text="GPU Stress Test",
+                             bg="#0f0f0f", fg="white",
+                             font=("Segoe UI", 12, "bold"))
+    gpu_title_lbl.pack(side="left", padx=12)
+
+    gpu_status_lbl = tk.Label(gpu_hdr, text="",
+                              bg="#0f0f0f", fg=ACCENT_GPU,
+                              font=("Segoe UI", 10))
+    gpu_status_lbl.pack(side="left", padx=(0, 12))
+
+    gpu_temp_lbl  = tk.Label(gpu_hdr, text="Temp: —",  bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
+    gpu_power_lbl = tk.Label(gpu_hdr, text="Power: —", bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
+    gpu_load_lbl  = tk.Label(gpu_hdr, text="Load: —",  bg="#0f0f0f", fg="#888888", font=("Segoe UI", 9))
+    gpu_temp_lbl.pack(side="left",  padx=8)
+    gpu_power_lbl.pack(side="left", padx=8)
+    gpu_load_lbl.pack(side="left",  padx=8)
+
+    gpu_stop_btn = tk.Button(gpu_hdr, text="  ■ Stop  ",
+                             bg="#e63946", fg="white",
+                             font=("Segoe UI", 10, "bold"),
+                             relief="flat", padx=12, pady=6, cursor="hand2",
+                             command=_gpu_stop)
+    gpu_stop_btn.pack(side="right", padx=12, pady=6)
+
+    gpu_log = tk.Text(gpu_active, bg="#0a0a0a", fg="#cccccc",
+                      font=("Consolas", 10), bd=0, relief="flat",
+                      state="disabled", wrap="none")
+    gpu_log.grid(row=1, column=0, sticky="nsew")
+
+    gpu_vsb = tk.Scrollbar(gpu_active, orient="vertical", command=gpu_log.yview)
+    gpu_vsb.grid(row=1, column=1, sticky="ns")
+    gpu_log.configure(yscrollcommand=gpu_vsb.set)
+
+    gpu_log.tag_configure("info", foreground="#888888")
+    gpu_log.tag_configure("head", foreground=ACCENT_GPU)
+
+    _tabs["cpu"]["gpu_active"] = gpu_active
+
+    def _show_gpu_active():
+        _tabs["cpu"]["menu"].place_forget()
+        _tabs["cpu"]["active"].place_forget()
+        if "ram_active" in _tabs["cpu"]:
+            _tabs["cpu"]["ram_active"].place_forget()
+        gpu_active.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+    def _show_gpu_menu():
+        _gpu_stop()
+        _show_page_in_tab("cpu", "menu")
+
+    grid_row += 1
 
     # ── RAM active view (log + stop) ──────────────────────────────────────────
     ram_active = tk.Frame(stress_content, bg=BG)

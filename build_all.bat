@@ -1,5 +1,5 @@
 @echo off
-:: build_all.bat — HardwareToad v0.7.2 Beta
+:: build_all.bat — HardwareToad v0.8.0 Beta
 title HardwareToad - Build Script
 cd /d "%~dp0"
 
@@ -74,8 +74,39 @@ if errorlevel 1 (
 )
 echo Done.
 
+:: ── Build GPUStress (DX12 stress engine) ─────────────────────────────────────
+echo [2b/5] Building GPUStress...
+set "VCVARS="
+for %%V in (18 17 16 15) do if not defined VCVARS (
+    for %%E in (Community Professional Enterprise BuildTools) do if not defined VCVARS (
+        if exist "C:\Program Files\Microsoft Visual Studio\%%V\%%E\VC\Auxiliary\Build\vcvars64.bat" (
+            set "VCVARS=C:\Program Files\Microsoft Visual Studio\%%V\%%E\VC\Auxiliary\Build\vcvars64.bat"
+        )
+    )
+)
+if defined VCVARS (
+    if not exist "%~dp0GPUStress\build" mkdir "%~dp0GPUStress\build"
+    set "GPU_BUILD_SCRIPT=%TEMP%\gpu_build_release.bat"
+    echo @echo off > "%TEMP%\gpu_build_release.bat"
+    echo call "%VCVARS%" ^>nul 2^>^&1 >> "%TEMP%\gpu_build_release.bat"
+    echo cd /d "%~dp0GPUStress\build" >> "%TEMP%\gpu_build_release.bat"
+    echo cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release --log-level=ERROR ^>nul 2^>^&1 >> "%TEMP%\gpu_build_release.bat"
+    echo nmake /nologo ^>nul 2^>^&1 >> "%TEMP%\gpu_build_release.bat"
+    call "%TEMP%\gpu_build_release.bat"
+    del "%TEMP%\gpu_build_release.bat" >nul 2>&1
+)
+:: Copy to dist (freshly built or pre-existing)
+if exist "%~dp0GPUStress\build\GPUStress.exe" (
+    if not exist "%~dp0dist\GPUStress" mkdir "%~dp0dist\GPUStress"
+    copy /y "%~dp0GPUStress\build\GPUStress.exe" "%~dp0dist\GPUStress\GPUStress.exe" >nul
+    xcopy /e /y /q "%~dp0GPUStress\build\shaders" "%~dp0dist\GPUStress\shaders\" >nul 2>&1
+    echo [2b/5] GPUStress ready.
+) else (
+    echo [WARN] GPUStress.exe not found - GPU stress tests unavailable in this build.
+)
+
 :: ── Obfuscate LHMBridge with Obfuscar ───────────────────────────────────────
-echo [2b/5] Obfuscating LHMBridge...
+echo [2c/5] Obfuscating LHMBridge...
 where obfuscar.console >nul 2>&1
 if %errorlevel% neq 0 (
     :: Try local .NET tool
@@ -104,6 +135,7 @@ if errorlevel 1 (
 :skip_obfuscar
 echo Done.
 echo [3/5] Building EXE with PyInstaller...
+cd /d "%~dp0"
 %PYTHON% -m PyInstaller hardware_toad.spec --noconfirm --clean
 if errorlevel 1 (
     echo ERROR: PyInstaller failed

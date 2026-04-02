@@ -1,5 +1,5 @@
 @echo off
-:: dev.bat — HardwareToad v0.7.2 Beta
+:: dev.bat — HardwareToad v0.8.0 Beta
 cd /d "%~dp0"
 
 :: Auto-elevate to admin (required for LHMBridge ring0 access)

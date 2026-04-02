@@ -1,4 +1,4 @@
-; installer.iss — HardwareToad v0.5.6 Beta
+; installer.iss — HardwareToad v0.8.0 Beta
 ; HardwareToad - Inno Setup Installer Script
 
 #define AppName "HardwareToad"
@@ -36,6 +36,8 @@ Name: "desktopicon"; Description: "Create a &Desktop shortcut"; GroupDescription
 [Files]
 Source: "dist\HardwareToad\HardwareToad.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\HardwareToad\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\GPUStress\GPUStress.exe"; DestDir: "{app}\GPUStress"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\GPUStress\shaders\*"; DestDir: "{app}\GPUStress\shaders"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Registry]
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\{#AppExeName}"; ValueData: "RUNASADMIN"; Flags: uninsdeletevalue

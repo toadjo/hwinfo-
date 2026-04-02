@@ -1,4 +1,4 @@
-APP_VERSION = "v0.7.5 Beta"
+APP_VERSION = "v0.8.0 Beta"
 
 # ── Black + Red — MSI Dragon inspired ─────────────────────────────────────────
 # Pure black base, red accent, no blue tint
