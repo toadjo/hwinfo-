@@ -1,5 +1,5 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "download_url": "https://github.com/toadjo/HardwareToad/releases/latest",
-  "changelog": "GPU stress engine (DX12), GPU Core/VRAM/Combined tests, active view UI, installer includes GPUStress"
+  "changelog": "CPU temp fix for more CPUs, brutal GPU stress shaders, GPU sensor polling fix"
 }

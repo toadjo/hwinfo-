@@ -193,9 +193,9 @@ bool DX12Engine::InitRenderTarget() {
     if (FAILED(m_device->CreateDescriptorHeap(&uavHeapDesc, IID_PPV_ARGS(&m_cbvSrvUavHeap))))
         return false;
 
-    // Offscreen render target 1920x1080
+    // Offscreen render target 3840x2160 (4K) — maximum rasterizer pressure
     auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto rtDesc    = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, 1920, 1080,
+    auto rtDesc    = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, 3840, 2160,
                                                    1, 1, 1, 0,
                                                    D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
     D3D12_CLEAR_VALUE clearVal = {};
@@ -267,8 +267,9 @@ void DX12Engine::RunCompute() {
     m_cmdList->SetComputeRootDescriptorTable(0,
         m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
 
-    // Dispatch 65535 groups of 256 threads = max GPU occupancy
-    m_cmdList->Dispatch(65535, 1, 1);
+    // Dispatch maximum workgroups — 3D dispatch for full GPU occupancy
+    // 65535 x 64 x 1 = ~4M workgroups × 256 threads = ~1 billion shader invocations per frame
+    m_cmdList->Dispatch(65535, 64, 1);
     m_cmdList->Close();
 
     ID3D12CommandList* lists[] = { m_cmdList.Get() };
@@ -288,6 +289,9 @@ void DX12Engine::RunVRAMBandwidth() {
     m_cmdList->ResourceBarrier(2, barriers);
 
     m_cmdList->CopyResource(m_vramDst.Get(), m_vramSrc.Get());
+    m_cmdList->CopyResource(m_vramSrc.Get(), m_vramDst.Get());
+    m_cmdList->CopyResource(m_vramDst.Get(), m_vramSrc.Get());
+    m_cmdList->CopyResource(m_vramSrc.Get(), m_vramDst.Get());
 
     // Transition back
     barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_vramSrc.Get(),
@@ -307,8 +311,8 @@ void DX12Engine::RunRasterizer() {
 
     m_cmdList->SetGraphicsRootSignature(m_gfxRootSig.Get());
 
-    D3D12_VIEWPORT vp = { 0, 0, 1920, 1080, 0.0f, 1.0f };
-    D3D12_RECT scissor = { 0, 0, 1920, 1080 };
+    D3D12_VIEWPORT vp = { 0, 0, 3840, 2160, 0.0f, 1.0f };
+    D3D12_RECT scissor = { 0, 0, 3840, 2160 };
     m_cmdList->RSSetViewports(1, &vp);
     m_cmdList->RSSetScissorRects(1, &scissor);
 
@@ -319,8 +323,8 @@ void DX12Engine::RunRasterizer() {
     m_cmdList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
 
     m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    // Draw 3000 triangles (no vertex buffer, generated in VS)
-    m_cmdList->DrawInstanced(3, 3000, 0, 0);
+    // Draw 30000 triangles — 10x more rasterizer load
+    m_cmdList->DrawInstanced(3, 30000, 0, 0);
 
     m_cmdList->Close();
     ID3D12CommandList* lists[] = { m_cmdList.Get() };

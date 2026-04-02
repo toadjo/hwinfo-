@@ -42,6 +42,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="DiskInfoToolkit" Version="1.1.2" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
+    <PackageReference Include="RAMSPDToolkit-NDD" Version="1.4.2" />
     <PackageReference Include="System.Management" Version="10.0.4" />
   </ItemGroup>
 </Project>

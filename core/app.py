@@ -3034,28 +3034,29 @@ def main():
             return
         def _fetch_and_apply():
             try:
-                import urllib.request as _ur, json as _j
-                r = _ur.urlopen(_ur.Request(
-                    f"http://127.0.0.1:{bridge.port}/sensors",
-                    headers={"X-HardwareToad-Token": get_bridge_token()}
-                ), timeout=2)
-                data = _j.loads(r.read())
                 temp = power = load = None
-                for hw_name, sensors in data.items():
-                    if "gpu" not in hw_name.lower(): continue
-                    temp  = next((s["value"] for s in sensors if s["type"] == "Temperature" and "core" in s["name"].lower()), None)
-                    power = next((s["value"] for s in sensors if s["type"] == "Power"), None)
-                    load  = next((s["value"] for s in sensors if s["type"] == "Load" and "core" in s["name"].lower()), None)
-                    break
+                # Use bridge methods which handle Type/Value casing correctly
+                temp = bridge.get_primary_gpu_temp()
+                # Get power and load from snapshot
+                for key in bridge.get_gpu_keys():
+                    sensors = bridge.get_sensor_snapshot(key)
+                    if power is None:
+                        power = bridge.sensor_value_in(sensors, ["GPU Package", "GPU Chip", "Package"], "Power")
+                    if load is None:
+                        load = bridge.sensor_value_in(sensors, ["GPU Core", "Core"], "Load")
+                    if temp is not None and power is not None and load is not None:
+                        break
                 def _apply():
                     if not _gpu_running[0]: return
                     gpu_temp_lbl.config(
                         text=f"Temp: {temp:.0f}°C" if temp is not None else "Temp: —",
                         fg=temp_color(temp) if temp is not None else "#888888")
                     gpu_power_lbl.config(
-                        text=f"Power: {power:.0f}W" if power is not None else "Power: —")
+                        text=f"Power: {power:.0f}W" if power is not None else "Power: —",
+                        fg="#cccccc" if power is not None else "#888888")
                     gpu_load_lbl.config(
-                        text=f"Load: {load:.0f}%" if load is not None else "Load: —")
+                        text=f"Load: {load:.0f}%" if load is not None else "Load: —",
+                        fg="#cccccc" if load is not None else "#888888")
                     root.after(2000, _gpu_poll_sensors)
                 root.after(0, _apply)
             except Exception:

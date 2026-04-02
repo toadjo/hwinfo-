@@ -5,6 +5,21 @@ All notable changes to HardwareToad will be documented here.
 
 ---
 
+## [v0.8.1 Beta] - 2026-04-02
+
+### Fixed
+- CPU temperature now works on previously unsupported CPUs (i7-8700, R5-5800X, others) — upgraded LHM dependencies to match vendor dll v0.9.6
+- GPU sensor polling (Temp/Power/Load) now correctly reads from LHMBridge using proper bridge methods
+
+### Changed
+- GPU stress shaders massively upgraded — ~10x more compute load per shader invocation
+  - Compute: 128 loops of transcendental ops (sin/cos/sqrt/exp/log) instead of simple FMA
+  - Pixel: 256 heavy ops/pixel with dependency chains, 4K render target instead of 1080p
+  - Rasterizer: 30,000 triangles instead of 3,000
+  - VRAM: 4 copy passes per frame instead of 1
+
+---
+
 ## [v0.8.0 Beta] - 2026-04-02
 
 ### Added
