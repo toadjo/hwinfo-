@@ -8,7 +8,13 @@ from .constants import BADGE_HOT, BADGE_LIVE, BADGE_OK, BADGE_WARN, BADGE_OFF
 def temp_color(v):
     if v is None:
         return "#4a4a4a"
-    return "#ff6b6b" if v > 80 else ("#ffd43b" if v > 65 else "#69db7c")
+    if v > 90:
+        return "#ff4444"      # critical red
+    if v > 80:
+        return "#ff8c00"      # hot orange — distinct from red gauges
+    if v > 65:
+        return "#ffd43b"      # warm yellow
+    return "#69db7c"          # cool green
 
 
 def usage_color(v):
@@ -54,8 +60,10 @@ def fmt_temp(v):
 def badge_for_temp(v):
     if v is None:
         return "N/A", BADGE_OFF
-    if v > 80:
+    if v > 90:
         return "HOT", BADGE_HOT
+    if v > 80:
+        return "WARM", BADGE_WARN
     if v > 65:
         return "WARM", BADGE_WARN
     return "OK", BADGE_OK

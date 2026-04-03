@@ -426,9 +426,121 @@ class BridgeManager:
         try:
             r = self._make_request("/timings", timeout=1)
             data = json.loads(r.read())
-            return data if isinstance(data, dict) and data else {}
+            if isinstance(data, dict) and data:
+                return data
+        except Exception:
+            pass
+        return {}
+
+    def get_wmi_memory_info(self):
+        """WMI SMBIOS fallback — returns dict with 'speed', 'voltage', and JEDEC timings."""
+        try:
+            import subprocess
+            cmd = (
+                'powershell -NoProfile -Command "'
+                'Get-CimInstance Win32_PhysicalMemory | Select-Object '
+                'ConfiguredClockSpeed,ConfiguredVoltage,Speed,SMBIOSMemoryType '
+                '| ConvertTo-Json -Compress"'
+            )
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, shell=True)
+            if r.returncode != 0:
+                return {}
+            data = json.loads(r.stdout.strip())
+            # Single stick returns dict, multiple returns list
+            if isinstance(data, dict):
+                data = [data]
+            if not data:
+                return {}
+            stick = data[0]
+            result = {}
+            v = stick.get("ConfiguredVoltage")
+            if v and v > 0:
+                result["voltage"] = v / 1000.0  # millivolts → volts
+            configured = stick.get("ConfiguredClockSpeed") or 0
+            spd_speed  = stick.get("Speed") or 0
+            speed = configured or spd_speed
+            # SMBIOSMemoryType: 26 = DDR4, 34 = DDR5
+            mem_type = stick.get("SMBIOSMemoryType", 0)
+            if speed and speed > 0:
+                result["spd_speed"] = speed
+                timings = self._jedec_timings_for_speed(speed, mem_type)
+                if timings:
+                    result["jedec_timings"] = timings
+            return result
         except Exception:
             return {}
+
+    @staticmethod
+    def _jedec_timings_for_speed(mhz, mem_type=0):
+        """Return standard JEDEC CL-tRCD-tRP-tRAS for a given speed.
+
+        WMI ConfiguredClockSpeed behaviour varies by system:
+          - Some return real clock (e.g. 1333 for DDR4-2666)
+          - Some return MT/s directly (e.g. 2666 for DDR4-2666)
+        We use SMBIOSMemoryType + voltage + value range to determine
+        whether to double or not.
+        """
+        # JEDEC standard timing tables keyed by MT/s
+        # DDR4 — JEDEC SPD standard timings per speed bin
+        ddr4 = {
+            2133: (15, 15, 15, 33),
+            2400: (17, 17, 17, 39),
+            2666: (19, 19, 19, 42),
+            2933: (21, 21, 21, 47),
+            3200: (22, 22, 22, 52),
+        }
+        # DDR5 — JEDEC SPD standard timings per speed bin
+        ddr5 = {
+            4800: (40, 40, 40, 77),
+            5200: (42, 42, 42, 83),
+            5600: (46, 46, 46, 90),
+            6000: (50, 50, 50, 97),
+            6400: (52, 52, 52, 103),
+            6800: (56, 56, 56, 110),
+            7200: (58, 58, 58, 116),
+            7600: (62, 62, 62, 122),
+            8000: (64, 64, 64, 129),
+            8400: (68, 68, 68, 135),
+            8800: (72, 72, 72, 142),
+        }
+
+        # Determine if value is already MT/s or needs doubling
+        # SMBIOSMemoryType: 26=DDR4, 34=DDR5
+        is_ddr4 = mem_type == 26 or (mem_type == 0 and mhz <= 3200)
+        is_ddr5 = mem_type == 34 or (mem_type == 0 and mhz > 3200)
+
+        if is_ddr4:
+            # Check if value is already MT/s (>= 2000) or real clock (< 2000)
+            if mhz >= 2000:
+                mt_s = mhz  # already MT/s
+            else:
+                mt_s = mhz * 2  # real clock → MT/s
+            table = ddr4
+        elif is_ddr5:
+            if mhz >= 4000:
+                mt_s = mhz  # already MT/s
+            else:
+                mt_s = mhz * 2
+            table = ddr5
+        else:
+            # Unknown type — try both tables
+            mt_s = mhz if mhz >= 2000 else mhz * 2
+            table = {**ddr4, **ddr5}
+
+        # Exact match
+        if mt_s in table:
+            cl, rcd, rp, ras = table[mt_s]
+            return {"tCL": cl, "tRCD": rcd, "tRP": rp, "tRAS": ras}
+
+        # Closest bin ≤ actual speed
+        best = None
+        for bin_mt, vals in sorted(table.items()):
+            if bin_mt <= mt_s:
+                best = vals
+        if best:
+            cl, rcd, rp, ras = best
+            return {"tCL": cl, "tRCD": rcd, "tRP": rp, "tRAS": ras}
+        return None
 
     def diagnose_na(self, sensor_type, hw_hint=""):
         """Return a short reason string for why a sensor shows N/A."""

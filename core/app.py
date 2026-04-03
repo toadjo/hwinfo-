@@ -1512,23 +1512,32 @@ def main():
     root.title(f"HardwareToad {APP_VERSION}")
 
     # ── Window / taskbar / title bar icon ─────────────────────────────────────
-    try:
-        import base64 as _b64, io as _io
-        _icon_rgba = Image.open(_io.BytesIO(_b64.b64decode(_LOGO_B64))).convert("RGBA")
-        # Composite onto #0a0a0a for title bar — transparent PNG causes tkinter
-        # to show the default feather icon instead of our logo
-        def _on_dark(pil_img, size):
-            bg = Image.new("RGBA", (size, size), (10, 10, 10, 255))
-            fg = pil_img.resize((size, size), Image.LANCZOS)
-            bg.paste(fg, (0, 0), fg)
-            return ImageTk.PhotoImage(bg.convert("RGB"))
-        _icon_lg = _on_dark(_icon_rgba, 256)
-        _icon_sm = _on_dark(_icon_rgba, 32)
-        root.iconphoto(True, _icon_lg, _icon_sm)
-        root._icon_lg = _icon_lg
-        root._icon_sm = _icon_sm
-    except Exception:
-        pass
+    def _apply_icon():
+        try:
+            import base64 as _b64, io as _io
+            _icon_rgba = Image.open(_io.BytesIO(_b64.b64decode(_LOGO_B64))).convert("RGBA")
+            # Crop transparent padding so the toad fills the icon frame
+            bbox = _icon_rgba.getbbox()
+            if bbox:
+                _icon_rgba = _icon_rgba.crop(bbox)
+            def _make_icon(pil_img, size):
+                fg = pil_img.resize((size, size), Image.LANCZOS)
+                return ImageTk.PhotoImage(fg)
+            _icon_lg = _make_icon(_icon_rgba, 256)
+            _icon_md = _make_icon(_icon_rgba, 48)   # taskbar on standard DPI
+            _icon_sm = _make_icon(_icon_rgba, 32)   # title bar
+            root.iconphoto(True, _icon_lg, _icon_md, _icon_sm)
+            root._icon_lg = _icon_lg
+            root._icon_md = _icon_md
+            root._icon_sm = _icon_sm
+            print("[Icon] iconphoto applied OK")
+        except Exception as _icon_err:
+            import traceback
+            print(f"[Icon] FAILED: {_icon_err}")
+            traceback.print_exc()
+    root.update_idletasks()
+    _apply_icon()
+    root.after(200, _apply_icon)
 
     root.configure(bg=BG)
     root.resizable(True, True)
@@ -2235,6 +2244,17 @@ def main():
                     ram_timing_str = "-".join(parts) + " (SPD)"
                 break
 
+        # WMI JEDEC timing fallback (cached)
+        if ram_timing_str == "—":
+            if not hasattr(bridge, "_wmi_mem_cache"):
+                bridge._wmi_mem_cache = bridge.get_wmi_memory_info()
+            wmi = bridge._wmi_mem_cache
+            jt = wmi.get("jedec_timings")
+            if jt:
+                parts = [str(jt["tCL"]), str(jt["tRCD"]),
+                         str(jt["tRP"]), str(jt["tRAS"])]
+                ram_timing_str = "-".join(parts) + " (JEDEC)"
+
         ram_volt_str = "—"
         snap = bridge.get_data_snapshot()
         for key, sensors in snap.items():
@@ -2243,6 +2263,26 @@ def main():
             if v is not None and 1.0 <= v <= 2.0:
                 ram_volt_str = f"{v:.3f} V"
             break
+
+        # Try mobo SuperIO voltages for DRAM voltage
+        if ram_volt_str == "—":
+            mobo = bridge.get_mobo_sensors()
+            for ventry in mobo.get("voltages", []):
+                vname = (ventry.get("name") or "").lower()
+                vval  = ventry.get("value")
+                if vval and any(kw in vname for kw in ["dram", "dimm", "vdd", "memory"]):
+                    if 0.8 <= vval <= 2.5:
+                        ram_volt_str = f"{vval:.3f} V"
+                        break
+
+        # WMI SMBIOS fallback for voltage (runs once, caches result)
+        if ram_volt_str == "—":
+            if not hasattr(bridge, "_wmi_mem_cache"):
+                bridge._wmi_mem_cache = bridge.get_wmi_memory_info()
+            wmi = bridge._wmi_mem_cache
+            wv = wmi.get("voltage")
+            if wv and 0.8 <= wv <= 2.5:
+                ram_volt_str = f"{wv:.3f} V"
 
         ram_timing_lbl.config(text=ram_timing_str)
         ram_voltage_lbl.config(text=ram_volt_str)
@@ -2716,14 +2756,14 @@ def main():
                 def _fetch_sensors():
                     """Fresh snapshot direct from bridge — bypasses cache."""
                     try:
-                        r = bridge._make_request("/sensors", timeout=1)
+                        r = bridge._make_request("/sensors", timeout=3)
                         return _json.loads(r.read())
                     except Exception:
                         return bridge.get_data_snapshot()  # fall back to cache
 
                 def _cpu_temp_live():
                     try:
-                        r = bridge._make_request("/cpu-temp", timeout=1)
+                        r = bridge._make_request("/cpu-temp", timeout=3)
                         val = r.read().decode().strip()
                         return float(val) if val != "null" else None
                     except Exception:
@@ -3031,28 +3071,69 @@ def main():
             return
         def _fetch_and_apply():
             try:
-                temp = power = load = volt = None
-                temp = bridge.get_primary_gpu_temp()
-                for key in bridge.get_gpu_keys():
-                    sensors = bridge.get_sensor_snapshot(key)
-                    if power is None:
-                        power = bridge.sensor_value_in(sensors, ["GPU Package", "GPU Chip", "Package"], "Power")
+                import json as _json
+                temp = power = load = volt = vram = hotspot = None
+
+                # Direct bridge call — bypass cache for fresh data
+                try:
+                    r = bridge._make_request("/sensors", timeout=3)
+                    snap = _json.loads(r.read())
+                except Exception:
+                    snap = bridge.get_data_snapshot()
+
+                for key, sensors in snap.items():
+                    if "gpu" not in key.lower():
+                        continue
+                    # Skip Intel iGPU if a discrete GPU exists
+                    is_igpu = "intel" in key.lower() and "uhd" in key.lower()
+                    has_dgpu = any("nvidia" in k.lower() or "amd" in k.lower() or "radeon" in k.lower()
+                                   for k in snap if "gpu" in k.lower())
+                    if is_igpu and has_dgpu:
+                        continue
+
+                    # Temperature — try multiple name patterns
+                    if temp is None:
+                        temp = bridge.sensor_value_in(sensors,
+                            ["GPU Core", "Core", "Temperature", "GPU"],
+                            "Temperature")
+                    if hotspot is None:
+                        hotspot = bridge.sensor_value_in(sensors,
+                            ["Hot Spot", "Hotspot", "Junction"],
+                            "Temperature")
                     if load is None:
-                        load = bridge.sensor_value_in(sensors, ["GPU Core", "Core"], "Load")
+                        load = bridge.sensor_value_in(sensors,
+                            ["D3D 3D", "GPU Core", "Core", "GPU Total", "Video Engine"],
+                            "Load")
+                    if power is None:
+                        power = bridge.sensor_value_in(sensors,
+                            ["GPU Package", "GPU Chip", "Package", "GPU Power", "GPU"],
+                            "Power")
                     if volt is None:
-                        volt = bridge.sensor_value_in(sensors, ["GPU Core", "Core", "GPU"], "Voltage")
-                    if all(x is not None for x in [temp, power, load, volt]):
+                        volt = bridge.sensor_value_in(sensors,
+                            ["GPU Core", "Core", "GPU"],
+                            "Voltage")
+                    if vram is None:
+                        vram = bridge.sensor_value_in(sensors,
+                            ["D3D Dedicated", "GPU Memory Used", "Memory Used"],
+                            "SmallData")
+                    # Once we have at least load or temp from this GPU, use it
+                    if load is not None or temp is not None:
                         break
 
                 def _apply():
                     if not _gpu_running[0]: return
                     parts = []
-                    if temp  is not None: parts.append(f"Temp: {temp:.0f}°C")
-                    if load  is not None: parts.append(f"Load: {load:.0f}%")
-                    if power is not None: parts.append(f"Power: {power:.0f}W")
-                    if volt  is not None: parts.append(f"Volt: {volt:.3f}V")
+                    if temp    is not None: parts.append(f"Temp: {temp:.0f}°C")
+                    if hotspot is not None and hotspot != temp:
+                        parts.append(f"Hot: {hotspot:.0f}°C")
+                    if load    is not None: parts.append(f"Load: {load:.0f}%")
+                    if power   is not None: parts.append(f"Power: {power:.0f}W")
+                    if volt    is not None: parts.append(f"Volt: {volt:.3f}V")
+                    if vram    is not None: parts.append(f"VRAM: {vram:.0f}MB")
                     if parts:
                         _gpu_log_write("[GPU] " + " | ".join(parts))
+                    else:
+                        _gpu_log_write("[GPU] Sensors: waiting for data…")
                     root.after(5000, _gpu_poll_sensors)
                 root.after(0, _apply)
             except Exception:

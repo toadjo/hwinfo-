@@ -32,7 +32,7 @@ class LHMBridge
 
     // ── Debug log — circular buffer, thread-safe ──────────────────────────────
     static readonly List<string> _debugLog = new();
-    static void DbgLog(string msg)
+    internal static void DbgLog(string msg)
     {
         if (!debugMode) return;
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
@@ -127,6 +127,7 @@ class LHMBridge
                     IsMotherboardEnabled = true,
                     IsStorageEnabled     = true,
                     IsNetworkEnabled     = false,
+                    IsControllerEnabled  = true,
                 };
                 computer.Open();
                 DbgLog($"computer.Open() succeeded. Hardware count: {computer.Hardware.Count}");
@@ -151,6 +152,7 @@ class LHMBridge
                         IsCpuEnabled = true, IsGpuEnabled = true,
                         IsMemoryEnabled = true, IsMotherboardEnabled = true,
                         IsStorageEnabled = false, IsNetworkEnabled = false,
+                        IsControllerEnabled = true,
                     };
                     computer.Open();
                     DbgLog($"Minimal init succeeded. Hardware count: {computer.Hardware.Count}");
@@ -257,12 +259,12 @@ class LHMBridge
                         updateThread.Start();
                         updateThread.Join(TimeSpan.FromSeconds(5));
 
-                        // AMD memory timings — read every 10 ticks (20s) since static
+                        // Memory timings — read every 10 ticks (20s) since static
                         string timingsJson = _cachedTimings;
                         if (tick % 10 == 0)
                         {
-                            var timings = AmdMemoryTimings.Read();
-                            timingsJson = JsonSerializer.Serialize(timings ?? new Dictionary<string, object>());
+                            timingsJson = JsonSerializer.Serialize(
+                                MemoryTimings.Read() ?? new Dictionary<string, object>());
                         }
 
                         if (result.Count > 0)
@@ -1602,6 +1604,9 @@ static class Ring0
 {
     static readonly System.Reflection.MethodInfo? _readPci;
     static readonly System.Reflection.MethodInfo? _writePci;
+    static readonly System.Reflection.MethodInfo? _readMemGeneric;
+    static readonly System.Reflection.MethodInfo? _readIoPort;
+    static readonly System.Reflection.MethodInfo? _writeIoPort;
 
     static Ring0()
     {
@@ -1612,6 +1617,25 @@ static class Ring0
         _writePci = t?.GetMethod("WritePciConfig",
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public,
             null, new[] { typeof(uint), typeof(uint), typeof(uint) }, null);
+        _readIoPort = t?.GetMethod("ReadIoPort",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public,
+            null, new[] { typeof(uint), typeof(uint).MakeByRefType() }, null);
+        _writeIoPort = t?.GetMethod("WriteIoPort",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public,
+            null, new[] { typeof(uint), typeof(uint) }, null);
+        LHMBridge.DbgLog($"[Ring0] _readIoPort found: {_readIoPort != null}, _writeIoPort found: {_writeIoPort != null}");
+        // ReadMemory<T>(ulong address, ref T buffer) — generic method
+        if (t != null)
+        {
+            foreach (var m in t.GetMethods(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public))
+            {
+                if (m.Name == "ReadMemory" && m.IsGenericMethodDefinition)
+                {
+                    _readMemGeneric = m.MakeGenericMethod(typeof(uint));
+                    break;
+                }
+            }
+        }
     }
 
     public static bool ReadPciConfig(uint pciAddr, uint regAddr, out uint value)
@@ -1628,5 +1652,356 @@ static class Ring0
     {
         if (_writePci == null) return false;
         return (bool?)_writePci.Invoke(null, new object[] { pciAddr, regAddr, value }) ?? false;
+    }
+
+    public static bool ReadIoPort(uint port, out uint value)
+    {
+        value = 0;
+        if (_readIoPort == null) return false;
+        var args = new object[] { port, (uint)0 };
+        var ok = (bool?)_readIoPort.Invoke(null, args) ?? false;
+        value = (uint)args[1];
+        return ok;
+    }
+
+    public static bool WriteIoPort(uint port, uint value)
+    {
+        if (_writeIoPort == null) return false;
+        return (bool?)_writeIoPort.Invoke(null, new object[] { port, value }) ?? false;
+    }
+
+    public static bool ReadMemory(IntPtr physAddress, out uint value)
+    {
+        value = 0;
+        ulong addr = (ulong)(long)physAddress;
+
+        // LHM Ring0.ReadMemory<T>(ulong address, ref T buffer)
+        // unitSize=1, count=Marshal.SizeOf(T) — confirmed from LHM source
+        if (_readMemGeneric != null)
+        {
+            try
+            {
+                // Signature: bool ReadMemory<uint>(ulong address, ref uint buffer)
+                var args = new object[] { addr, (uint)0 };
+                var ok = (bool?)_readMemGeneric.Invoke(null, args) ?? false;
+                if (ok) { value = (uint)args[1]; LHMBridge.DbgLog($"[Ring0] LHM ReadMemory 0x{addr:X} = 0x{value:X8}"); return true; }
+                LHMBridge.DbgLog($"[Ring0] LHM ReadMemory<uint> returned false for 0x{addr:X}");
+            }
+            catch (Exception ex) { LHMBridge.DbgLog($"[Ring0] LHM ReadMemory exception: {ex.InnerException?.Message ?? ex.Message}"); }
+        }
+        else
+        {
+            LHMBridge.DbgLog("[Ring0] _readMemGeneric is null — reflection failed to find ReadMemory");
+        }
+
+        // Fallback: open WinRing0 driver directly
+        try { return ReadViaWinRing0(addr, out value); }
+        catch { return false; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess,
+        uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode,
+        byte[] lpInBuffer, uint nInBufferSize,
+        byte[] lpOutBuffer, uint nOutBufferSize,
+        out uint lpBytesReturned, IntPtr lpOverlapped);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr hObject);
+
+    static bool ReadViaWinRing0(ulong physAddr, out uint result)
+    {
+        result = 0;
+        // WinRing0 device names (try both)
+        string[] deviceNames = { @"\\.\WinRing0_1_2_0", @"\\.\OLS_1" };
+        const uint GENERIC_READ  = 0x80000000;
+        const uint GENERIC_WRITE = 0x40000000;
+        const uint OPEN_EXISTING = 3;
+        // IOCTL_OLS_READ_MEMORY = CTL_CODE(40000, 0x841, METHOD_BUFFERED, FILE_READ_ACCESS)
+        // = (40000 << 16) | (FILE_READ_ACCESS=1 << 14) | (0x841 << 2) | METHOD_BUFFERED=0
+        // = 0x9C40_0000 | 0x4000 | 0x2104 | 0 = 0x9C406104
+        const uint IOCTL_OLS_READ_MEMORY = 0x9C406104;
+
+        foreach (var devName in deviceNames)
+        {
+            var handle = CreateFile(devName, GENERIC_READ | GENERIC_WRITE,
+                0, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            int openErr = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            LHMBridge.DbgLog($"[Ring0] CreateFile {devName} handle={(long)handle} err=0x{openErr:X}");
+            if (handle == IntPtr.Zero || handle == (IntPtr)(-1))
+                continue;
+
+            try
+            {
+                // WinRing0 ReadMemoryInput struct (from LHM/OHM source):
+                //   ulong address   = 8 bytes (physical address)
+                //   uint  unitSize  = 4 bytes — MUST BE 1 (byte units)
+                //   uint  count     = 4 bytes — number of bytes = Marshal.SizeOf(T) = 4
+                // Total input: 16 bytes. Output: count * unitSize = 4 bytes.
+                var inBuf = new byte[16];
+                BitConverter.GetBytes(physAddr).CopyTo(inBuf, 0);  // 8-byte address
+                BitConverter.GetBytes((uint)1).CopyTo(inBuf, 8);   // unitSize = 1
+                BitConverter.GetBytes((uint)4).CopyTo(inBuf, 12);  // count = 4 bytes
+
+                var outBuf = new byte[4];
+                bool ok = DeviceIoControl(handle, IOCTL_OLS_READ_MEMORY,
+                    inBuf, (uint)inBuf.Length,
+                    outBuf, (uint)outBuf.Length,
+                    out uint bytesReturned, IntPtr.Zero);
+                int ioErr = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                LHMBridge.DbgLog($"[Ring0] DeviceIoControl dev={devName} ok={ok} bytes={bytesReturned} addr=0x{physAddr:X8} lastErr=0x{ioErr:X}");
+                if (ok && bytesReturned >= 4)
+                {
+                    result = BitConverter.ToUInt32(outBuf, 0);
+                    LHMBridge.DbgLog($"[Ring0] ReadMemory 0x{physAddr:X8} = 0x{result:X8}");
+                    return true;
+                }
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+        return false;
+    }
+}
+
+// ── Intel Memory Timing Reader ───────────────────────────────────────────────
+// Reads actual running memory timings from Intel Memory Controller Hub (MCH)
+// via MCHBAR MMIO registers. Works on 6th gen (Skylake) through 14th gen
+// (Raptor Lake Refresh). Requires admin/ring0 (provided by LHM WinRing0).
+//
+// Method: Read PCI config 0:0:0 offset 0x48 → MCHBAR base address
+//         Then read MMIO timing registers at known offsets per generation.
+//
+// Register layouts (DDR4, Skylake-Rocket Lake gen 6-11):
+//   MCHBAR+0x4000 (TC_DBP): [4:0]=tRCD  [12:8]=tRP  [20:16]=tCL  [28:24]=tCWL
+//   MCHBAR+0x4004 (TC_RAP): [7:0]=tRAS  [15:8]=tCCDL [20:16]=tRTP [28:24]=tWR
+//
+// Register layouts (DDR4/DDR5, Alder Lake+ gen 12-14):
+//   MCHBAR+0xE000 (TC_PRE):  [6:0]=tRP  [14:8]=tRAS  [21:16]=tRDPRE  [28:24]=tPPD
+//   MCHBAR+0xE008 (TC_ACT):  [30:24]=tRCD
+//   MCHBAR+0xE01C (TC_ODT):  varies — tCL in different bit positions
+static class IntelMemoryTimings
+{
+    public static Dictionary<string, object>? Read()
+    {
+        try
+        {
+            // Check if this is an Intel CPU
+            if (!IsIntel()) { DbgLog("[IntelTimings] Not Intel CPU"); return null; }
+
+            // Read MCHBAR base from PCI 0:0:0 offset 0x48 (64-bit register)
+            if (!Ring0.ReadPciConfig(0x00000000, 0x48, out uint mchbarLo)) { DbgLog("[IntelTimings] PCI read 0x48 failed"); return null; }
+            if (!Ring0.ReadPciConfig(0x00000000, 0x4C, out uint mchbarHi)) { DbgLog("[IntelTimings] PCI read 0x4C failed"); return null; }
+
+            ulong mchbar = ((ulong)mchbarHi << 32) | (mchbarLo & 0xFFFFFFFE); // mask enable bit
+            DbgLog($"[IntelTimings] MCHBAR = 0x{mchbar:X}");
+            if (mchbar == 0) return null;
+
+            int gen = GetIntelGeneration();
+            DbgLog($"[IntelTimings] Detected gen {gen}");
+
+            if (gen >= 12)
+                return ReadAlderLake(mchbar);
+            else if (gen >= 6)
+                return ReadSkylake(mchbar);
+
+            return null;
+        }
+        catch (Exception ex) { DbgLog($"[IntelTimings] Exception: {ex.Message}"); return null; }
+    }
+
+    static void DbgLog(string msg)
+    {
+        try { LHMBridge.DbgLog(msg); } catch { }
+    }
+
+    static Dictionary<string, object>? ReadSkylake(ulong mchbar)
+    {
+        // The MCHBAR MMIO read via WinRing0 is blocked on modern Windows for 0xFEDxxxxx.
+        // Alternative: Intel iGPU (Device 2) exposes an IOBAR with an index/data register pair
+        // that allows reading any MCHBAR register via I/O ports — no MMIO needed.
+        // I/O ports are never blocked by WinRing0.
+        //
+        // Intel IOBAR: Device 2 (iGPU), Function 0, PCI config offset 0x20 = GTTMMADR IOBAR
+        // The actual I/O index/data ports are at IOBAR base:
+        //   IOBAR+0 = MMIO_INDEX (write MCHBAR offset here)
+        //   IOBAR+4 = MMIO_DATA  (read result here)
+        // This is documented in Intel 10th gen Vol 2 datasheet section on iGPU IOBAR.
+
+        // Get iGPU IOBAR base from PCI config B:0 D:2 F:0 offset 0x20
+        // PCI address encoding: (bus << 8) | (dev << 3) | func, then for B0D2F0: 0x0010
+        uint pciAddrDev2 = (0 << 8) | (2 << 3) | 0;  // Bus 0, Dev 2, Func 0
+        if (!Ring0.ReadPciConfig(pciAddrDev2, 0x20, out uint iobarRaw))
+        {
+            DbgLog($"[IntelTimings] IOBAR PCI read failed, trying MMIO fallback");
+            return ReadSkylakeMmio(mchbar);
+        }
+
+        // IOBAR is I/O space BAR: bit 0 = 1 (I/O indicator), bits[15:3] = base address
+        if ((iobarRaw & 1) == 0)
+        {
+            DbgLog($"[IntelTimings] Device 2 BAR at 0x20 is not I/O space (raw=0x{iobarRaw:X}), trying MMIO");
+            return ReadSkylakeMmio(mchbar);
+        }
+        uint iobarBase = iobarRaw & 0xFFFC;
+        DbgLog($"[IntelTimings] iGPU IOBAR base = 0x{iobarBase:X}");
+
+        // Read TC_DBP at MCHBAR+0x4000 via IOBAR index/data
+        uint tcDbp = 0, tcRap = 0;
+        if (!ReadViaMchbarIobar(iobarBase, 0x4000, out tcDbp) ||
+            !ReadViaMchbarIobar(iobarBase, 0x4004, out tcRap))
+        {
+            DbgLog($"[IntelTimings] IOBAR read failed, trying MMIO fallback");
+            return ReadSkylakeMmio(mchbar);
+        }
+
+        return ParseSkylakeRegisters(tcDbp, tcRap);
+    }
+
+    static bool ReadViaMchbarIobar(uint iobarBase, uint mchbarOffset, out uint value)
+    {
+        value = 0;
+        // Write MCHBAR-relative offset to index port
+        if (!Ring0.WriteIoPort(iobarBase, mchbarOffset)) { DbgLog($"[IntelTimings] WriteIoPort 0x{iobarBase:X} failed"); return false; }
+        // Read result from data port (index+4)
+        if (!Ring0.ReadIoPort(iobarBase + 4, out value)) { DbgLog($"[IntelTimings] ReadIoPort 0x{iobarBase+4:X} failed"); return false; }
+        DbgLog($"[IntelTimings] IOBAR[0x{mchbarOffset:X}] = 0x{value:X8}");
+        return true;
+    }
+
+    static Dictionary<string, object>? ReadSkylakeMmio(ulong mchbar)
+    {
+        // Last resort: try ReadMemory (works on some systems/older Windows)
+        if (!Ring0.ReadMemory((IntPtr)(long)(mchbar + 0x4000), out uint tcDbp)) { DbgLog("[IntelTimings] MMIO fallback also failed"); return null; }
+        if (!Ring0.ReadMemory((IntPtr)(long)(mchbar + 0x4004), out uint tcRap)) return null;
+        return ParseSkylakeRegisters(tcDbp, tcRap);
+    }
+
+    static Dictionary<string, object>? ParseSkylakeRegisters(uint tcDbp, uint tcRap)
+    {
+        DbgLog($"[IntelTimings] TC_DBP=0x{tcDbp:X8} TC_RAP=0x{tcRap:X8}");
+
+        uint tRCD = (tcDbp >> 0)  & 0x1F;
+        uint tRP  = (tcDbp >> 8)  & 0x1F;
+        uint tCL  = (tcDbp >> 16) & 0x1F;
+        uint tRAS = (tcRap >> 0)  & 0xFF;
+
+        DbgLog($"[IntelTimings] tCL={tCL} tRCD={tRCD} tRP={tRP} tRAS={tRAS}");
+
+        if (tCL == 0 || tCL > 40) { DbgLog($"[IntelTimings] Sanity FAIL tCL={tCL}"); return null; }
+
+        return new Dictionary<string, object>
+        {
+            ["tCL"]  = tCL,
+            ["tRCD"] = tRCD,
+            ["tRP"]  = tRP,
+            ["tRAS"] = tRAS,
+            ["source"] = "MCHBAR"
+        };
+    }
+
+    static Dictionary<string, object>? ReadAlderLake(ulong mchbar)
+    {
+        // Same IOBAR approach for gen 12-14, different register offsets
+        uint pciAddrDev2 = (0 << 8) | (2 << 3) | 0;
+        Ring0.ReadPciConfig(pciAddrDev2, 0x20, out uint iobarRaw);
+        uint iobarBase = (iobarRaw & 1) == 1 ? iobarRaw & 0xFFFC : 0;
+
+        uint tcPre = 0, tcAct = 0, tcOdt = 0;
+        bool ok;
+        if (iobarBase != 0)
+        {
+            ok = ReadViaMchbarIobar(iobarBase, 0xE000, out tcPre) &&
+                 ReadViaMchbarIobar(iobarBase, 0xE008, out tcAct) &&
+                 ReadViaMchbarIobar(iobarBase, 0xE01C, out tcOdt);
+        }
+        else
+        {
+            ok = Ring0.ReadMemory((IntPtr)(long)(mchbar + 0xE000), out tcPre) &&
+                 Ring0.ReadMemory((IntPtr)(long)(mchbar + 0xE008), out tcAct) &&
+                 Ring0.ReadMemory((IntPtr)(long)(mchbar + 0xE01C), out tcOdt);
+        }
+        if (!ok) return null;
+
+        uint tRP  = (tcPre >> 0) & 0x7F;
+        uint tRAS = (tcPre >> 8) & 0x7F;
+        uint tRCD = (tcAct >> 24) & 0x7F;
+        uint tCL  = (tcOdt >> 0) & 0x7F;
+
+        if (tCL == 0 || tCL > 60)
+        {
+            if (iobarBase != 0) ReadViaMchbarIobar(iobarBase, 0xE050, out tcOdt);
+            else Ring0.ReadMemory((IntPtr)(long)(mchbar + 0xE050), out tcOdt);
+            tCL = tcOdt & 0x7F;
+        }
+
+        if (tCL == 0 || tCL > 60) return null;
+
+        return new Dictionary<string, object>
+        {
+            ["tCL"]  = tCL,
+            ["tRCD"] = tRCD,
+            ["tRP"]  = tRP,
+            ["tRAS"] = tRAS,
+            ["source"] = "MCHBAR"
+        };
+    }
+
+    static bool IsIntel()
+    {
+        try
+        {
+            var info = new System.Management.ManagementObjectSearcher(
+                "SELECT Manufacturer FROM Win32_Processor").Get();
+            foreach (System.Management.ManagementObject obj in info)
+            {
+                string mfr = obj["Manufacturer"]?.ToString() ?? "";
+                if (mfr.Contains("Intel", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+        catch { return false; }
+    }
+
+    static int GetIntelGeneration()
+    {
+        try
+        {
+            // Read CPUID family/model to determine generation
+            // PCI Device ID at 0:0:0 offset 0x02 also encodes the generation
+            if (!Ring0.ReadPciConfig(0x00000000, 0x00, out uint devId)) return 0;
+            uint did = (devId >> 16) & 0xFFFF;
+
+            // Map Host Bridge Device IDs to Intel generations
+            // Skylake (6th): 0x190x, 0x191x
+            if ((did & 0xFFF0) == 0x1900 || (did & 0xFFF0) == 0x1910) return 6;
+            // Kaby Lake (7th): 0x590x, 0x591x
+            if ((did & 0xFFF0) == 0x5900 || (did & 0xFFF0) == 0x5910) return 7;
+            // Coffee Lake (8/9th): 0x3E0x, 0x3E1x, 0x3EC0-0x3ECF
+            if ((did & 0xFF00) == 0x3E00) return 8;
+            // Comet Lake (10th): 0x9B0x-0x9B6x
+            if ((did & 0xFF00) == 0x9B00) return 10;
+            // Rocket Lake (11th): 0x4C0x
+            if ((did & 0xFF00) == 0x4C00) return 11;
+            // Alder Lake (12th): 0x460x, 0x461x, 0x462x, 0x467x, 0x46Ax
+            if ((did & 0xFF00) == 0x4600) return 12;
+            // Raptor Lake (13th): 0xA70x, 0xA71x, 0xA74x, 0xA78x
+            if ((did & 0xFF00) == 0xA700) return 13;
+            // Raptor Lake Refresh (14th): 0xA70x range (same as 13th typically)
+            // Meteor Lake (14th mobile): 0x7D0x
+            if ((did & 0xFF00) == 0x7D00) return 14;
+
+            // Fallback: if Device ID >= 0x4600, assume Alder Lake+
+            if (did >= 0x4600) return 12;
+            // Otherwise assume Skylake-era layout
+            return 6;
+        }
+        catch { return 0; }
     }
 }
