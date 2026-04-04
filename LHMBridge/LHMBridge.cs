@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
@@ -754,7 +755,8 @@ static class AmdMemoryTimings
                         ["tCL"]   = cl,  ["tRCDRD"] = rcdrd,
                         ["tRP"]   = rp,  ["tRAS"]   = ras,
                         ["tRFC"]  = rfc, ["tRFC2"]  = rfc2,
-                        ["CR"]    = cr,  ["source"]  = "SMN"
+                        ["CR"]    = cr,
+                        ["source"] = PawnIO.Available ? "PawnIO" : "SMN"
                     };
                 }
             }
@@ -763,9 +765,14 @@ static class AmdMemoryTimings
         return null;
     }
 
-    // SMN indirect read via PCI config on AMD data fabric
+    // SMN indirect read — PawnIO first, Ring0 fallback
     static uint ReadSMN(uint addr)
     {
+        // PawnIO path (AMDFamily17 module handles SMN via PCI config internally)
+        if (PawnIO.ReadSMN(addr, out uint pawnData))
+            return pawnData;
+
+        // Ring0/WinRing0 fallback
         const uint PCI_ADDR = 0x00000000; // bus=0, dev=0, fn=0
         const uint SMN_INDEX = 0xB8;
         const uint SMN_DATA  = 0xBC;
@@ -1594,6 +1601,128 @@ static class RamTester
         }
 
         _running = false;
+    }
+}
+
+// ── PawnIO driver interface for SMN access ────────────────────────────────────
+// Loads PawnIOLib.dll dynamically + AMDFamily17 module for safe SMN reads
+static class PawnIO
+{
+    static IntPtr _handle;
+    static bool _initialized;
+    static bool _available;
+    static readonly object _initLock = new();
+
+    // PawnIOLib win32 function signatures
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int DOpen(out IntPtr handle);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int DLoad(IntPtr handle, byte[] blob, nuint size);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int DExecute(IntPtr handle,
+        [MarshalAs(UnmanagedType.LPStr)] string name,
+        ulong[] @in, nuint inSize,
+        ulong[] @out, nuint outSize,
+        out nuint returnSize);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int DClose(IntPtr handle);
+
+    static DExecute? _execute;
+
+    public static bool Available
+    {
+        get
+        {
+            if (!_initialized) Init();
+            return _available;
+        }
+    }
+
+    static void Init()
+    {
+        if (_initialized) return;
+        lock (_initLock)
+        {
+            if (_initialized) return;
+            _initialized = true;
+            try { DoInit(); }
+            catch { _available = false; }
+        }
+    }
+
+    static string? FindInstallPath()
+    {
+        // Registry first
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO");
+            var path = key?.GetValue("InstallLocation") as string;
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path)) return path;
+        }
+        catch { }
+
+        // Default install location
+        var def = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PawnIO");
+        if (Directory.Exists(def)) return def;
+
+        return null;
+    }
+
+    static void DoInit()
+    {
+        var installPath = FindInstallPath();
+        if (installPath == null) return;
+
+        var dllPath = Path.Combine(installPath, "PawnIOLib.dll");
+        if (!File.Exists(dllPath)) return;
+
+        // Find AMDFamily17 module blob (.amx)
+        var modulePath = Directory.GetFiles(installPath, "AMDFamily17*", SearchOption.AllDirectories)
+            .FirstOrDefault(f => !f.EndsWith(".p", StringComparison.OrdinalIgnoreCase));
+        if (modulePath == null) return;
+
+        // Load native library
+        var lib = NativeLibrary.Load(dllPath);
+
+        // Use HRESULT variants (not _win32 BOOL variants) so hr < 0 = failure
+        var fnOpen = Marshal.GetDelegateForFunctionPointer<DOpen>(
+            NativeLibrary.GetExport(lib, "pawnio_open"));
+        var fnLoad = Marshal.GetDelegateForFunctionPointer<DLoad>(
+            NativeLibrary.GetExport(lib, "pawnio_load"));
+        _execute = Marshal.GetDelegateForFunctionPointer<DExecute>(
+            NativeLibrary.GetExport(lib, "pawnio_execute"));
+
+        // Open executor
+        int hr = fnOpen(out _handle);
+        if (hr < 0) return;
+
+        // Load AMDFamily17 module
+        var blob = File.ReadAllBytes(modulePath);
+        hr = fnLoad(_handle, blob, (nuint)blob.Length);
+        if (hr < 0)
+        {
+            var fnClose = Marshal.GetDelegateForFunctionPointer<DClose>(
+                NativeLibrary.GetExport(lib, "pawnio_close"));
+            fnClose(_handle);
+            _handle = IntPtr.Zero;
+            return;
+        }
+
+        _available = true;
+    }
+
+    public static bool ReadSMN(uint addr, out uint value)
+    {
+        value = 0;
+        if (!Available || _execute == null) return false;
+        var inBuf = new ulong[] { addr };
+        var outBuf = new ulong[1];
+        int hr = _execute(_handle, "ioctl_read_smn", inBuf, 1, outBuf, 1, out _);
+        if (hr < 0) return false;
+        value = (uint)(outBuf[0] & 0xFFFFFFFF);
+        return true;
     }
 }
 
