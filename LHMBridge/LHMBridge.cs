@@ -310,6 +310,57 @@ class LHMBridge
                                 break; // only first motherboard
                             }
 
+                            // ── PawnIO SuperIO fallback ───────────────────────────────
+                            // If LHM reports all fans as 0 (WinRing0 likely blocked),
+                            // try reading directly via PawnIO SuperIO access
+                            try
+                            {
+                                var lhmFans = moboData.ContainsKey("fans")
+                                    ? moboData["fans"] as List<object> : null;
+                                bool allFansZero = lhmFans != null && lhmFans.Count > 0
+                                    && lhmFans.All(f => {
+                                        var v = f?.GetType().GetProperty("value")?.GetValue(f);
+                                        return v is float fv && fv <= 0;
+                                    });
+                                // Also try PawnIO if LHM found no fans at all
+                                bool noFans = lhmFans == null || lhmFans.Count == 0;
+
+                                if (allFansZero || noFans)
+                                {
+                                    var sio = SuperIOReader.Read();
+                                    if (sio != null)
+                                    {
+                                        if (sio.Fans.Count > 0)
+                                        {
+                                            var pawnioFans = new List<object>();
+                                            foreach (var f in sio.Fans)
+                                            {
+                                                if (f.Rpm > 0)
+                                                    pawnioFans.Add(new { name = f.Name, value = (float)f.Rpm });
+                                            }
+                                            if (pawnioFans.Count > 0)
+                                            {
+                                                moboData["fans"] = pawnioFans;
+                                                moboData["fans_source"] = $"PawnIO ({sio.ChipName})";
+                                                DbgLog($"PawnIO SuperIO fallback: {pawnioFans.Count} fans from {sio.ChipName}");
+                                            }
+                                        }
+                                        // Also supplement temperatures if LHM has none
+                                        var lhmTemps = moboData.ContainsKey("temperatures")
+                                            ? moboData["temperatures"] as List<object> : null;
+                                        if ((lhmTemps == null || lhmTemps.Count == 0) && sio.Temps.Count > 0)
+                                        {
+                                            var pawnioTemps = new List<object>();
+                                            foreach (var t in sio.Temps)
+                                                pawnioTemps.Add(new { name = t.Name, value = t.Celsius });
+                                            moboData["temperatures"] = pawnioTemps;
+                                            moboData["temps_source"] = $"PawnIO ({sio.ChipName})";
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex) { DbgLog($"PawnIO SuperIO fallback error: {ex.Message}"); }
+
                             // ── Build /debug snapshot ─────────────────────────────────
                             var debugData = new Dictionary<string, object>
                             {
@@ -1641,33 +1692,75 @@ static class Ring0
     public static bool ReadPciConfig(uint pciAddr, uint regAddr, out uint value)
     {
         value = 0;
-        if (_readPci == null) return false;
-        var args = new object[] { pciAddr, regAddr, (uint)0 };
-        var ok = (bool?)_readPci.Invoke(null, args) ?? false;
-        value = (uint)args[2];
-        return ok;
+        if (_readPci != null)
+        {
+            var args = new object[] { pciAddr, regAddr, (uint)0 };
+            var ok = (bool?)_readPci.Invoke(null, args) ?? false;
+            if (ok) { value = (uint)args[2]; return true; }
+        }
+        // PawnIO fallback — decode LHM PCI address format to bus/dev/func
+        if (PawnIO.Init())
+        {
+            uint bus  = (pciAddr >> 8) & 0xFF;
+            uint dev  = (pciAddr >> 3) & 0x1F;
+            uint func = pciAddr & 0x7;
+            var v = PawnIO.PciRead(bus, dev, func, regAddr);
+            if (v != null) { value = v.Value; return true; }
+        }
+        return false;
     }
 
     public static bool WritePciConfig(uint pciAddr, uint regAddr, uint value)
     {
-        if (_writePci == null) return false;
-        return (bool?)_writePci.Invoke(null, new object[] { pciAddr, regAddr, value }) ?? false;
+        if (_writePci != null)
+        {
+            var ok = (bool?)_writePci.Invoke(null, new object[] { pciAddr, regAddr, value }) ?? false;
+            if (ok) return true;
+        }
+        // PawnIO fallback
+        if (PawnIO.Init())
+        {
+            uint bus  = (pciAddr >> 8) & 0xFF;
+            uint dev  = (pciAddr >> 3) & 0x1F;
+            uint func = pciAddr & 0x7;
+            PawnIO.PciWrite(bus, dev, func, regAddr, value);
+            return true;
+        }
+        return false;
     }
 
     public static bool ReadIoPort(uint port, out uint value)
     {
         value = 0;
-        if (_readIoPort == null) return false;
-        var args = new object[] { port, (uint)0 };
-        var ok = (bool?)_readIoPort.Invoke(null, args) ?? false;
-        value = (uint)args[1];
-        return ok;
+        if (_readIoPort != null)
+        {
+            var args = new object[] { port, (uint)0 };
+            var ok = (bool?)_readIoPort.Invoke(null, args) ?? false;
+            if (ok) { value = (uint)args[1]; return true; }
+        }
+        // PawnIO fallback
+        if (PawnIO.Init())
+        {
+            var v = PawnIO.IoInDword(port);
+            if (v != null) { value = v.Value; return true; }
+        }
+        return false;
     }
 
     public static bool WriteIoPort(uint port, uint value)
     {
-        if (_writeIoPort == null) return false;
-        return (bool?)_writeIoPort.Invoke(null, new object[] { port, value }) ?? false;
+        if (_writeIoPort != null)
+        {
+            var ok = (bool?)_writeIoPort.Invoke(null, new object[] { port, value }) ?? false;
+            if (ok) return true;
+        }
+        // PawnIO fallback
+        if (PawnIO.Init())
+        {
+            PawnIO.IoOutDword(port, value);
+            return true;
+        }
+        return false;
     }
 
     public static bool ReadMemory(IntPtr physAddress, out uint value)
